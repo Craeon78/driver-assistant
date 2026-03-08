@@ -592,7 +592,11 @@ extension AppModel {
 
             reconcileDistanceIfPossible(afterNewOdoKm: odoKm, at: recordTime, context: capturedContext)
 
-            lastOdoCaptureTime = recordTime
+            // Shadow-mode mirror only: alternate engine learns from the same odo anchor.
+
+            mirrorOdoCaptureToShadow(odoKm: odoKm, at: recordTime)
+
+            lastOdoCaptureTime = recordTime
 
         }
 

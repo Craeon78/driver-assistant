@@ -232,6 +232,38 @@ final class AppModel: ObservableObject {
 
     @Published var gpsShiftMetersLive: Double = 0
 
+    // MARK: - Shadow Telemetry (alternate GPS engine)
+
+    private let shadowGpsEngine = GPSDistanceEngine()
+
+    private var shadowLastMirroredLocationTimestamp: Date? = nil
+
+    private var shadowHasStartedSpan: Bool = false
+
+    private var shadowProcessedTotalKmBacking: Double = 0
+
+    private var shadowRawTotalKmBacking: Double = 0
+
+    @Published var productionRawGpsDistanceKm: Double = 0
+
+    @Published var alternateProcessedGpsDistanceKm: Double = 0
+
+    @Published var alternateRawGpsDistanceKm: Double = 0
+
+    @Published var alternateEffectiveCorrectionFactor: Double = 1.0
+
+    @Published var lastShadowOdoDeltaKm: Double? = nil
+
+    @Published var lastShadowRawGpsDeltaKm: Double? = nil
+
+    @Published var lastShadowProcessedGpsDeltaKm: Double? = nil
+
+    @Published var lastShadowChosenSource: DistanceSource? = nil
+
+    @Published var lastShadowErrorVsOdoKm: Double? = nil
+
+    @Published var shadowTelemetryAvailable: Bool = false
+
     var requestGpsKickFromUI: ((String) -> Void)? = nil
 
     var requestLmResetShiftMetersFromUI: ((String) -> Void)? = nil
@@ -890,19 +922,47 @@ final class AppModel: ObservableObject {
 
             .store(in: &gpsCancellables)
 
-        lm.$gpsShiftMeters
+        lm.$gpsShiftMeters
 
             .receive(on: DispatchQueue.main)
 
-            .sink { [weak self] meters in
+            .sink { [weak self] meters in
 
-                self?.gpsShiftMetersLive = meters
+                self?.gpsShiftMetersLive = meters
 
-            }
+                self?.productionRawGpsDistanceKm = meters / 1000.0
 
-            .store(in: &gpsCancellables)
+            }
 
-        lm.$lastGoodLocation
+            .store(in: &gpsCancellables)
+
+        lm.$lastLocation
+
+            .receive(on: DispatchQueue.main)
+
+            .sink { [weak self] loc in
+
+                guard let self, let loc else { return }
+
+                // Mirror each unique sample once into the alternate stack.
+
+                if let last = self.shadowLastMirroredLocationTimestamp,
+
+                   abs(last.timeIntervalSince(loc.timestamp)) < 0.0001 {
+
+                    return
+
+                }
+
+                self.shadowLastMirroredLocationTimestamp = loc.timestamp
+
+                self.shadowGpsEngine.handleLocationUpdate(loc)
+
+            }
+
+            .store(in: &gpsCancellables)
+
+        lm.$lastGoodLocation
 
             .receive(on: DispatchQueue.main)
 
@@ -1004,9 +1064,93 @@ final class AppModel: ObservableObject {
 
         lastOdoCaptureTime = nil
 
-    }
+        shadowLastMirroredLocationTimestamp = nil
 
-    // MARK: - Other Activity Persistence
+        shadowHasStartedSpan = false
+
+        shadowProcessedTotalKmBacking = 0
+
+        shadowRawTotalKmBacking = 0
+
+        productionRawGpsDistanceKm = 0
+
+        alternateProcessedGpsDistanceKm = 0
+
+        alternateRawGpsDistanceKm = 0
+
+        alternateEffectiveCorrectionFactor = 1.0
+
+        lastShadowOdoDeltaKm = nil
+
+        lastShadowRawGpsDeltaKm = nil
+
+        lastShadowProcessedGpsDeltaKm = nil
+
+        lastShadowChosenSource = nil
+
+        lastShadowErrorVsOdoKm = nil
+
+        shadowTelemetryAvailable = false
+
+    }
+
+    // MARK: - Shadow Telemetry Bridge
+
+    func mirrorOdoCaptureToShadow(odoKm: Int, at timestamp: Date) {
+
+        if !shadowHasStartedSpan {
+
+            shadowGpsEngine.startSpan(startOdoKm: odoKm, at: timestamp)
+
+            shadowHasStartedSpan = true
+
+            alternateEffectiveCorrectionFactor = shadowGpsEngine.effectiveCorrectionFactor
+
+            return
+
+        }
+
+        shadowGpsEngine.handleOdoCapture(newOdoKm: odoKm, timestamp: timestamp)
+
+        alternateEffectiveCorrectionFactor = shadowGpsEngine.effectiveCorrectionFactor
+
+        guard let log = shadowGpsEngine.spanLogs.last else { return }
+
+        let processedDeltaKm: Double = {
+
+            switch log.chosenSource {
+
+            case .raw:      return log.gpsRawKm
+
+            case .filtered: return log.gpsFilteredKm
+
+            }
+
+        }()
+
+        shadowRawTotalKmBacking += log.gpsRawKm
+
+        shadowProcessedTotalKmBacking += processedDeltaKm
+
+        alternateRawGpsDistanceKm = shadowRawTotalKmBacking
+
+        alternateProcessedGpsDistanceKm = shadowProcessedTotalKmBacking
+
+        lastShadowOdoDeltaKm = log.odoDeltaKm
+
+        lastShadowRawGpsDeltaKm = log.gpsRawKm
+
+        lastShadowProcessedGpsDeltaKm = processedDeltaKm
+
+        lastShadowChosenSource = log.chosenSource
+
+        lastShadowErrorVsOdoKm = log.odoDeltaKm - processedDeltaKm
+
+        shadowTelemetryAvailable = true
+
+    }
+
+    // MARK: - Other Activity Persistence
 
     private func saveOtherActivities() {
 
