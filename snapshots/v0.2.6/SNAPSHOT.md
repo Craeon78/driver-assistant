@@ -8,7 +8,7 @@ project: DriverAssistant
 
 version: v0.2.6
 
-snapshot_id: 2026308-1530
+snapshot_id: 20260308-1530
 
 date: 08-Mar-2026
 
@@ -23,8 +23,7 @@ build_status: Compiles / Runs
   
 
 copyrighted: © 2026 Cory Russell Olsen. All rights reserved.
-
-This snapshot and its contents are proprietary and confidential.
+confidentiality: Proprietary and confidential
 
 ---
 
