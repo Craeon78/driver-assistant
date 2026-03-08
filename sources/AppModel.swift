@@ -261,6 +261,7 @@ final class AppModel: ObservableObject {
     @Published var lastShadowChosenSource: DistanceSource? = nil
 
     @Published var lastShadowErrorVsOdoKm: Double? = nil
+    @Published var lastShadowErrorPercent: Double? = nil
 
     @Published var shadowTelemetryAvailable: Bool = false
 
@@ -1144,6 +1145,10 @@ final class AppModel: ObservableObject {
         lastShadowChosenSource = log.chosenSource
 
         lastShadowErrorVsOdoKm = log.odoDeltaKm - processedDeltaKm
+        
+        let errorPercent =
+    (lastShadowErrorVsOdoKm ?? 0) /
+    max(log.odoDeltaKm, 0.001) * 100
 
         shadowTelemetryAvailable = true
 
