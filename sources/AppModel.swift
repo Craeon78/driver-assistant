@@ -1117,16 +1117,15 @@ final class AppModel: ObservableObject {
         guard let log = shadowGpsEngine.spanLogs.last else { return }
 
         let processedDeltaKm: Double = {
+    switch log.chosenSource {
 
-            switch log.chosenSource {
+    case .raw:
+        return log.gpsRawKm
 
-            case .raw:      return log.gpsRawKm
-
-            case .filtered: return log.gpsFilteredKm
-
-            }
-
-        }()
+    case .filtered:
+        return log.gpsFilteredKm ?? log.gpsRawKm
+    }
+}()
 
         shadowRawTotalKmBacking += log.gpsRawKm
 
