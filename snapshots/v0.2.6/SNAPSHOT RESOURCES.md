@@ -21,8 +21,7 @@ device_reference: iPad8,10 / iOS 26.2.1
   
 
 copyrighted: © 2026 Cory Russell Olsen. All rights reserved.
-
-This snapshot and its contents are proprietary and confidential.
+confidentiality: Proprietary and confidential
 
 ---
 
