@@ -1,6 +1,8 @@
 import Foundation
 import CoreLocation
 
+/// Core-owned evidence for the deliberately advisory background-gap mechanism.
+/// Estimates remain provisional and never outrank driver-entered odometer anchors.
 struct BackgroundGapState {
     var lastEstimate: BackgroundGapEstimate?
     var history: [BackgroundGapEstimate] = []
@@ -13,6 +15,8 @@ struct BackgroundGapState {
     var pendingReason: String?
     var pendingSegmentID: UUID?
     var resumePending = false
+    var hasLoggedResumeNotPending = false
+    var distanceEvents: [DistanceEvent] = []
     var records: [BackgroundGapRecord] = []
     var activeGapID: UUID?
 }
