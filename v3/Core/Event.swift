@@ -24,7 +24,7 @@ public enum EventProvenance: String, Codable, Sendable {
 
 /// Minimal event that can be persisted and replayed.
 /// Domain-specific payloads will be added by later chunks via associated values or type erasure.
-public struct Event: Identifiable, Codable, Sendable {
+public struct Event: Identifiable, Codable, Sendable, Equatable {
     public let id: CanonicalID
     public let occurredAt: Date          // when the real-world thing happened
     public let recordedAt: Date          // when the system learned about it

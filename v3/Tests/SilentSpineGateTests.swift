@@ -6,13 +6,14 @@
 //
 // Gate tests for Chunk 1.
 // These must pass before Chunk 2 is opened.
+// Designed to be callable from Playgrounds without XCTest.
 //
 // Phase: Chunk 1 — Silent spine
 //======================================
 
 import Foundation
 
-/// Minimal test harness that can run without XCTest if needed (Playgrounds-friendly).
+/// Minimal test harness that can run without XCTest (Playgrounds-friendly).
 public enum SilentSpineGateTests {
 
     public static func runAll(store: EventStore) -> [String] {
@@ -60,7 +61,11 @@ public enum SilentSpineGateTests {
         let fabricated = ShiftFabricator.openShift()
         try store.append(fabricated.events)
 
-        // Simulate crash: drop the in-memory view and reload from disk.
+        // Simulate crash: if the store supports reload, use it; otherwise re-read.
+        if let fileStore = store as? FileEventStore {
+            try fileStore.reloadFromDisk()
+        }
+
         let reloaded = try store.allEvents()
         guard reloaded.count == fabricated.events.count else {
             throw TestError.countMismatch(expected: fabricated.events.count, actual: reloaded.count)
