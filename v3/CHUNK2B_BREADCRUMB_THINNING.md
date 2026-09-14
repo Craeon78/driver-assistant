@@ -31,11 +31,22 @@ This rule was not previously explicit in V2 retention tiers or V3 documents. It 
 
 The lifecycle rule above sits *inside* these tiers: thinning happens at interval close; the tiers then decide how long the thinned result (and any residual detail) is kept.
 
+## Human-in-the-loop experiment
+The temporary Playgrounds harness is a policy-training instrument, not the future Journal UI. It records only GPS samples accepted by the canonical V3 GPSFilter and exposes three complementary tests:
+
+1. **Visual fidelity** — MapKit overlays let Cory view Dense, Thinned or Both trails and decide whether the retained geometry still answers “where did I go / where did I stop?”.
+2. **Metric fidelity** — show dense path distance, thinned path distance and percentage difference. This is a diagnostic comparison only; ODO remains authoritative distance truth.
+3. **Event fidelity** — show stop-transition counts before/after thinning; key events and stop transitions remain always-keep candidates under policy.
+
+The harness also shows dense/thinned point counts, keep ratio and accepted/rejected GPS counts. Sliders remain temporary training controls for time interval, minimum distance and heading-change thresholds.
+
+The map and tuning UI MUST NOT be treated as early Chunk 6 Journal implementation. Chunk 6 consumes the resulting Core policy later.
+
 ## Gate for 2b
-Cory has exercised the interactive harness on real (or representative) data and recorded the practical thinning floor he is willing to accept.
+Cory has exercised the interactive harness on real (or representative) data and recorded the practical thinning floor he is willing to accept, considering visual, metric and event fidelity together.
 
 ## Files
 - Core/Breadcrumb.swift
 - Core/BreadcrumbThinner.swift
-- ThinningHarnessView.swift (Playgrounds entry)
+- ThinningHarnessView.swift (Playgrounds entry; temporary MapKit policy-training UI)
 - This document (lifecycle rule + policy experiment)
