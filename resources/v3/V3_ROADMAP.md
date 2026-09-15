@@ -17,25 +17,23 @@ Persistent Driver Work/Rest ledger; daily fatigue; rolling/multi-day analytical 
 
 Gate: **PASS** — real shift, relaunch, overnight-open and cross-midnight temporal tests preserve fatigue truth. Chunk 3 establishes canonical Driver temporal truth; it does not claim complete NHVR regulatory interpretation.
 
-## 3.5. NHVR regulatory interpretation + diary projections
-Insert a Policy/regulatory interpretation layer over the passed Chunk 3 ledger before Vehicle + Operations. Do not reopen or mutate Chunk 3 truth to satisfy regulatory presentation.
+## 3.5. NHVR regulatory interpretation + diary projections — PASS (2026-09-16)
+Policy/regulatory interpretation layer over the passed Chunk 3 ledger. Chunk 3 Driver truth remains locked and unmodified.
 
-Implement current applicable NHVR Standard Hours counting-period semantics, including:
-- sub-24-hour periods counted forward from relevant rest-break ends, with all simultaneously applicable/overlapping counting windows retained;
-- 24h / 7d / 14d periods anchored according to the applicable NHVR major-rest/counting rules rather than treating `now - duration` rolling analytics as statutory truth;
-- qualifying stationary rest, short-rest blocks, night rest, consecutive night rest and boundary/overlap cases;
-- base-time-zone handling and exact-boundary/adversarial fixtures;
+Implemented Standard Hours foundation includes:
+- sub-24-hour periods counted forward from rest-break ends with overlapping windows retained;
+- 24h / 7d / 14d policy fixtures for major stationary rest, night rest, consecutive night rest and overlapping anchors;
+- base-time-zone input and boundary/cross-midnight fixtures;
 - explicit separation of rolling analytics from statutory counting periods;
-- driver-facing current compliance state for each applicable period, with drill-down to all active/relevant counting windows and clear distinction between compliant-as-of-now, approaching constraint, breach and uncertain history;
-- forgotten/late/missing work-rest input, corrections, provenance and deterministic replay; missing history must never silently produce a more favourable compliance state;
-- one canonical exact-timestamp ledger capable of supporting both electronic-work-diary-style computation and written-work-diary/logbook projection without changing underlying fatigue truth. WWD rounding/representation and EWD-style exact-time interpretation are projections, not competing ledgers;
-- preserve the V2 logbook visual concept as a calendar/WWD projection where appropriate.
+- driver-facing compliance headline model with drill-down to active windows;
+- forgotten/late/missing work-rest uncertainty, correction/provenance support and deterministic replay;
+- one canonical exact-timestamp ledger projected separately as exact/EWD-style, WWD and local-area representations.
 
-Gate: Given one canonical work/rest history, Driver Assistant can simultaneously reconcile calendar/logbook representation, continuous episodes, shift truth, rolling analytics and every applicable NHVR counting period. Adversarial fixtures prove overlapping anchors and boundary cases. Driver forgetfulness/correction cannot silently create compliance. The driver can inspect current sub-24h counting-window status and the underlying applicable windows.
+Gate: **PASS** — foundation harness plus 3.5a Long-period Standard Hours, 3.5b Diary interpretation, 3.5c Recovery/replay and 3.5d Driver surface all passed in Swift Playgrounds on iPad on 2026-09-16. See `v3/CHUNK3_5_CLOSEOUT.md`.
 
-Scope note: Standard Hours is the first policy implementation. BFM/AFM/other schemes remain policy variants/deferred unless separately promoted; the architecture must not bake Standard Hours assumptions into Driver truth.
+Scope note: Standard Hours is the first policy implementation. BFM/AFM/other schemes remain policy variants/deferred unless separately promoted; the architecture must not bake Standard Hours assumptions into Driver truth. Passing Chunk 3.5 is an engineering gate, not NHVR certification of an EWD.
 
-## 4. Vehicle + Operations
+## 4. Vehicle + Operations — UNBLOCKED
 Vehicle model with current rigid and truck/quad-dog fixtures; independent Driver/Vehicle/Operations state.
 
 Gate: simultaneous truths coexist. The second vehicle fixture must not require Core/Driver/Operations redesign.
