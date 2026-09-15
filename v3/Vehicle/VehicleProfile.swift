@@ -118,12 +118,7 @@ public enum AssetReference: Codable, Sendable, Equatable {
     case equipment(CanonicalID)
 }
 
-public enum ConfigurationRelationshipKind: String, Codable, Sendable, CaseIterable {
-    case fittedTo
-    case coupledTo
-    case mountedTo
-    case carriedBy
-}
+public enum ConfigurationRelationshipKind: String, Codable, Sendable, CaseIterable { case fittedTo, coupledTo, mountedTo, carriedBy }
 
 /// Typed relationship between independently persistent physical assets.
 public struct ConfigurationRelationship: Codable, Sendable, Equatable {
@@ -178,10 +173,10 @@ public struct VehicleCombinationSnapshot: Codable, Sendable, Equatable {
 
     /// Stable within a snapshot and changes when participating asset identities/topology change.
     public var configurationFingerprint: String {
-        var parts = ["powered:\(chassis.id.rawValue.uuidString)"]
-        if let body { parts.append("body:\(body.id.rawValue.uuidString)") }
-        parts += towedAssets.map { "towed:\($0.id.rawValue.uuidString)" }
-        parts += equipment.map { "equipment:\($0.id.rawValue.uuidString)" }
+        var parts = ["powered:\(String(describing: chassis.id))"]
+        if let body { parts.append("body:\(String(describing: body.id))") }
+        parts += towedAssets.map { "towed:\(String(describing: $0.id))" }
+        parts += equipment.map { "equipment:\(String(describing: $0.id))" }
         parts += relationships.map { String(describing: $0) }
         return parts.joined(separator: "|")
     }
@@ -190,11 +185,11 @@ public struct VehicleCombinationSnapshot: Codable, Sendable, Equatable {
     /// fitted/mounted equipment. Carried equipment is current load, not tare.
     public var calculatedEmptyMassKg: Double? {
         var masses = [chassis.baseEmptyMassKg, body?.emptyMassKg] + towedAssets.map(\.emptyMassKg)
-        let carriedIDs = Set(relationships.compactMap { relationship -> CanonicalID? in
+        let carriedIDs = relationships.compactMap { relationship -> CanonicalID? in
             guard relationship.kind == .carriedBy, case let .equipment(id) = relationship.subject else { return nil }
             return id
-        })
-        masses += equipment.filter { !carriedIDs.contains($0.id) }.map(\.massKg)
+        }
+        masses += equipment.filter { equipment in !carriedIDs.contains(equipment.id) }.map(\.massKg)
         let known = masses.compactMap { $0 }
         guard !known.isEmpty else { return nil }
         return known.reduce(0, +)
