@@ -1,27 +1,23 @@
 # V3 Chunk 3 — Progress & Handover
 
-Last updated: 2026-09-15 (Bob — 3a structural scaffold)
+Last updated: 2026-09-15 (Bob — 3a PASS; 3b structural)
 
 ## Status
-**OPEN** — 3a structural code ready for device gate.
+**OPEN** — 3a PASS; 3b structural ready for device gate.
 
 ## Sub-chunk status
 
 | Sub | Status |
 |-----|--------|
-| 3a Ledger spine | STRUCTURAL READY — run `LedgerPlaygroundsRunner.runGate()` on device |
-| 3b Daily fatigue | Blocked on 3a device PASS |
-| 3c Rolling windows | Blocked on 3a device PASS |
-| 3d Field gate | Blocked on 3a–3c; truck evidence required for Chunk 3 PASS |
+| 3a Ledger spine | **PASS** (device 2026-09-15) |
+| 3b Daily fatigue | STRUCTURAL READY — run `DailyFatiguePlaygroundsRunner.runGate()` |
+| 3c Rolling windows | Blocked on optional order; needs 3a (done) |
+| 3d Field gate | Truck evidence required for Chunk 3 PASS |
 
-## Device dependency (3a)
+## Device (3b)
 ```swift
-print(LedgerPlaygroundsRunner.runGate())
+print(DailyFatiguePlaygroundsRunner.runGate())
 ```
-Report GATE PASS / FAIL lines.
 
 ## Deferred
-BFM until pre-ship. Full Operations / Sites UX. Commodity-specific activities.
-
-## Timers note (product)
-Countdown timers are derived readouts from ledger attributes (may go negative). They are not authority and are not part of 3a.
+BFM until pre-ship. Timers are derived readouts (may go negative), not part of 3a/3b authority.
