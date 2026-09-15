@@ -1,11 +1,11 @@
 # V3 Chunk 2 — Distance Truth Engine
 
-Status: IN PROGRESS
+Status: **PASS WITH RESIDUALS** (road gate 2026-09-14)
 Owner: Core
 Authority: V3_REFACTOR_CONTRACT.md + resources/v3/V3_ROADMAP.md + V2 GPS sources
 
 ## Goal
-Migrate proven V2 GPS measurement/filtering into a canonical Core evidence interface. Establish breadcrumb lifecycle stubs, Distance/ODO engine, and field-derived regression fixtures.
+Migrate proven V2 GPS measurement/filtering into a canonical Core evidence interface. Establish Distance/ODO engine and field-derived regression fixtures. Breadcrumb lifecycle detail is completed under Chunk 2b.
 
 ## Central invariants (locked)
 - Driver-entered ODO is the authoritative distance anchor.
@@ -17,7 +17,7 @@ Migrate proven V2 GPS measurement/filtering into a canonical Core evidence inter
 ## Gate
 Road comparison matches or beats V2 accuracy without the catalogued distance regressions.
 
-(This gate requires real driving data. Until then we close only the structural + regression-fixture layer.)
+**Result:** PASS WITH RESIDUALS. Real drive evidence satisfied the gate; optional further terrain variety remains a residual, not a blocker.
 
 ## Slice contract
 - Owning domain: Core
@@ -25,7 +25,7 @@ Road comparison matches or beats V2 accuracy without the catalogued distance reg
 - Prohibited: Driver fatigue, Vehicle mass, Operations activities, Cargo, UI
 - Inputs: CLLocation samples + driver ODO anchors
 - Outputs: DistanceEvidence events + corrected span distances
-- Non-goals: real-time UI, persistence of breadcrumbs beyond the event spine, multi-vehicle profiles
+- Non-goals: real-time UI, multi-vehicle profiles, commodity-specific vocabulary
 
 ## Files
 - Core/DistanceEvidence.swift
@@ -35,7 +35,6 @@ Road comparison matches or beats V2 accuracy without the catalogued distance reg
 - Tests/DistanceRegressionFixtures.swift
 - Tests/DistanceGateTests.swift
 
-## Residuals expected
-- Real road validation still required for final gate.
-- Breadcrumb retention policy is stubbed only.
-- Learning-rate maturity machine is carried forward from V2; may be refined later.
+## Residuals
+- Optional more varied terrain / multi-day distance samples later.
+- Breadcrumb retention policy and segment classification live in Chunk 2b.

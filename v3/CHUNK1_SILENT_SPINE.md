@@ -1,6 +1,6 @@
 # V3 Chunk 1 — Silent Spine
 
-Status: IN PROGRESS
+Status: **PASS** (device gate 2026-09-14)
 Owner: Core
 Authority: V3_REFACTOR_CONTRACT.md + resources/v3/V3_ROADMAP.md
 
@@ -12,7 +12,7 @@ No real GPS, fatigue rules, Fuel UI or AppModel changes in this chunk.
 ## Gate
 V3 boots, saves and replays a fabricated shift correctly, including forced crash/relaunch.
 
-Close as PASS / PASS WITH RESIDUALS / FAIL before opening Chunk 2.
+**Result:** PASS on device (InMemoryEventStore + FileEventStore).
 
 ## Ownership (locked for this chunk)
 - Core owns: lifecycle, persistence, event spine, canonical IDs, breadcrumbs/distance evidence interface (stub only), module infrastructure.

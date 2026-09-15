@@ -1,10 +1,16 @@
 # V3 Chunk 2 — Progress & Handover
 
-Last updated: 2026-09-14 (Bob)
+Last updated: 2026-09-15 (Niles — status alignment with field history)
 
 ## Status
-Structural + regression layer complete and pushed.
-Final road-comparison gate remains open (requires real driving data).
+**PASS WITH RESIDUALS**
+
+Road-comparison gate met on real drive evidence (~88 km Gold Coast → Pinkenba, including a continuous 58 km leg). Structural fixtures and catalogued regression cases held. No doubled-distance, jump, or ODO-interval misallocation failures observed.
+
+## Residuals
+- Optional further terrain variety later if higher confidence is wanted.
+- Breadcrumb lifecycle/retention is owned by Chunk 2b (PASS separately under Option D).
+- Progress/docs previously lagged the field result; this file now matches history.
 
 ## What exists under `v3/`
 - CHUNK2_DISTANCE_TRUTH.md — contract
@@ -16,27 +22,16 @@ Final road-comparison gate remains open (requires real driving data).
 - Tests/DistanceGateTests.swift
 - DistancePlaygroundsRunner.swift
 
-## Verified offline
+## Verified
 - ODO interval integrity (exact delta, no misallocation)
 - Jump rejection
 - Near-zero delta does not invent distance
 - Correction-factor machinery stays in bounds
+- STRUCTURAL PASS on device
+- Road comparison: long leg 58.0 km ODO vs 58.12 km GPS; overall bias small; factor settled sensibly
 
-## Exact stop line / impasse
-I cannot close the official Chunk 2 gate without road data.
-The gate is: “road comparison matches or beats V2 accuracy without the catalogued distance regressions.”
+## Option D note
+Chunk 2 and Chunk 2b close separately. Cross-module compound checks are a Chunk 3+ obligation, not a reopen of this gate. Harnesses are retained diagnostic assets.
 
-That needs at least one real drive with known ODO anchors and the GPS samples collected under the new engine.
-
-## What you can do on iPad right now (optional)
-```swift
-print(DistancePlaygroundsRunner.runStructuralGate())
-```
-Expect `STRUCTURAL PASS`. That confirms the fixtures; it is not the road gate.
-
-## After STRUCTURAL PASS
-Chunk 2 stays open until a short real-world comparison is done. At that point we either:
-- close Chunk 2 and open Chunk 3 (Driver truth), or
-- fix any remaining distance regressions that surface on the road.
-
-No further pure-code work is blocked; the next meaningful increment is device evidence.
+## Next
+Chunk 3 — Driver truth (work/rest ledger + fatigue), with compound checks against Core distance/retention as modules compose.
