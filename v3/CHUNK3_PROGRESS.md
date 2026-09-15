@@ -1,9 +1,9 @@
 # V3 Chunk 3 — Progress & Handover
 
-Last updated: 2026-09-15 (Bob — 3b PASS; 3c structural)
+Last updated: 2026-09-15 (Bob — 3d harness ready)
 
 ## Status
-**OPEN** — 3a PASS, 3b PASS; 3c structural ready for device gate.
+**OPEN** — 3a–3c PASS on device; 3d field harness ready for truck.
 
 ## Sub-chunk status
 
@@ -11,10 +11,13 @@ Last updated: 2026-09-15 (Bob — 3b PASS; 3c structural)
 |-----|--------|
 | 3a Ledger spine | **PASS** |
 | 3b Daily fatigue | **PASS** |
-| 3c Rolling windows | STRUCTURAL READY — `RollingFatiguePlaygroundsRunner.runGate()` |
-| 3d Field gate | Truck evidence required for Chunk 3 PASS |
+| 3c Rolling windows | **PASS** |
+| 3d Field gate | HARNESS READY — truck evidence pending |
 
-## Device (3c)
-```swift
-print(RollingFatiguePlaygroundsRunner.runGate())
-```
+## Device (3d)
+Import `FieldGateHarnessView.swift`. Either:
+- use its `typealias ContentView = FieldGateHarnessView`, or
+- set ContentView body to `FieldGateHarnessView()`.
+
+## Chunk 3 PASS requires
+Real shift evidence: relaunch + fatigue truth still correct (overnight-open if possible).
