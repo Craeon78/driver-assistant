@@ -1,6 +1,6 @@
 # V3 Chunk 3.5 — NHVR Regulatory Interpretation + Diary Projections
 
-Status: BUILDING
+Status: **PASS — CLOSED 2026-09-16**
 Owner: Policy/Regulatory
 Consumes: Driver-owned `WorkRestEntry` ledger and temporal views
 Authority: `V3_REFACTOR_CONTRACT.md` + `resources/v3/V3_ROADMAP.md` + current authoritative NHVR counting-time/work-rest guidance
@@ -17,7 +17,7 @@ Interpret passed Chunk 3 Driver truth under an explicit regulatory policy. Chunk
 - Missing/uncertain history must never silently improve compliance state.
 
 ## Standard Hours solo — first policy
-Initial implementation covers the Standard Hours solo table:
+Implementation foundation covers the Standard Hours solo table:
 - 5.5h: max 5.25h work; minimum 15 continuous minutes rest.
 - 8h: max 7.5h work; minimum 30m rest in blocks of >=15 continuous minutes.
 - 11h: max 10h work; minimum 60m rest in blocks of >=15 continuous minutes.
@@ -30,7 +30,7 @@ Initial implementation covers the Standard Hours solo table:
 Generate forward candidate periods from the end of every rest break. Retain simultaneously applicable/overlapping periods; do not keep one mutable `currentWindow`.
 
 ### 24 hours or longer — Standard Hours
-Count forward from the end of the longest major rest break required for the applicable period. If the required break has not been taken, count from the end of any rest break. A subsequent major rest inside an already-running 24h period does not erase that period; relevant overlapping periods must remain evaluable.
+Count forward from the end of the longest major rest break required for the applicable period. If the required break has not been taken, count from the end of any rest break. A subsequent major rest inside an already-running 24h period does not erase that period; relevant overlapping periods remain evaluable.
 
 ## Base time zone
 Policy evaluation and diary rendering use the driver's base time zone, not the device's transient location time zone.
@@ -44,9 +44,9 @@ One canonical exact-timestamp ledger supports projections; projections never mut
 - `localAreaRecord`: separate projection because local-area records are not assumed to use WWD/EWD rounding semantics.
 
 ## Driver UX contract
-For each applicable sub-24h rule the UI can show a concise current state and drill into all relevant windows. A tick means compliant **as of now**, not permission to continue working until the period end.
+For each applicable rule the UI can show a concise current state and drill into all relevant windows. A tick means compliant **as of now**, not permission to continue working until the period end.
 
-States should support at least:
+States support at least:
 - compliant as of now;
 - approaching constraint / action due;
 - breach;
@@ -55,12 +55,10 @@ States should support at least:
 ## Forgetfulness / corrections
 Late or forgotten input is normal. Policy may identify uncertainty but must not invent favourable history. Driver confirmation/correction updates canonical Driver truth with provenance, then Policy replays all affected anchors/windows.
 
-## Gate
-Given one canonical work/rest history, Driver Assistant can simultaneously reconcile:
-1. calendar/logbook representation;
-2. continuous episodes;
-3. driver-declared shift truth;
-4. rolling analytics;
-5. all applicable Standard Hours statutory counting periods.
+## Gate result
+**PASS on Swift Playgrounds/iPad, 2026-09-16.** Foundation gate plus 3.5a Long-period Standard Hours, 3.5b Diary interpretation, 3.5c Recovery/replay and 3.5d Driver surface all passed. See `CHUNK3_5_CLOSEOUT.md`.
 
-Adversarial fixtures must include overlapping rest-end anchors, exact limits, one-minute-under/over cases, cross-midnight history, subsequent major rest inside an existing 24h period, base-time-zone behaviour, missing history and historical correction/replay.
+Given one canonical work/rest history, the implemented foundation can reconcile calendar/logbook representation, continuous episodes, driver-declared shift truth, rolling analytics and Standard Hours policy counting-period views without introducing a competing Driver truth source.
+
+## Safety boundary
+Chunk 3.5 PASS is an engineering gate, not NHVR approval/certification of Driver Assistant as an EWD. Revalidate Policy against then-current authoritative requirements before wider release.
