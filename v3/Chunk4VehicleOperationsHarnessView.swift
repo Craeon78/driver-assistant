@@ -9,7 +9,7 @@ public struct Chunk4VehicleOperationsHarnessView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Chunk 4 — Vehicle + Operations").font(.title2.bold())
-                    Text("Historical vehicle truth • independent Operations ledger • replay").font(.caption).foregroundStyle(.secondary)
+                    Text("Chassis • modular body/container • tare • Operations safety • replay").font(.caption).foregroundStyle(.secondary)
                     Divider()
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
