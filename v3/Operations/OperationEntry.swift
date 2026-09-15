@@ -56,9 +56,16 @@ public struct OperationsLedger: Codable, Sendable, Equatable {
         entries.sort { $0.start < $1.start }
     }
 
-    public mutating func close(id: CanonicalID, at end: Date) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+    /// Closes an open operation only. Returns false for unknown IDs, repeated closes,
+    /// or an end timestamp before the operation began. Historical corrections belong
+    /// in an explicit provenance-preserving correction path rather than this lifecycle action.
+    @discardableResult
+    public mutating func close(id: CanonicalID, at end: Date) -> Bool {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+              entries[index].isOpen,
+              end >= entries[index].start else { return false }
         entries[index].end = end
+        return true
     }
 
     public var current: OperationEntry? {
