@@ -58,14 +58,15 @@ public enum DailyFatigueGateTests {
         check("Open kind rest", limbo.openKind == .rest)
 
         // Short closed rest <15m does not count as legal
+        // Work 06:00–09:00 (3h) + 09:10–10:10 (1h) = 4h; rest 10m not legal
         let shortEntries: [WorkRestEntry] = [
             WorkRestEntry(kind: .work, start: t(6, 0), end: t(9, 0)),
             WorkRestEntry(kind: .rest, start: t(9, 0), end: t(9, 10), stationaryRest: true),
-            WorkRestEntry(kind: .work, start: t(9, 10), end: t(10, 0))
+            WorkRestEntry(kind: .work, start: t(9, 10), end: t(10, 10))
         ]
-        let shortSnap = DailyFatigueEvaluator.evaluate(entries: shortEntries, asOf: t(10, 0), calendar: cal)
+        let shortSnap = DailyFatigueEvaluator.evaluate(entries: shortEntries, asOf: t(10, 10), calendar: cal)
         check("Short rest not legal", shortSnap.legalRestSeconds < 1, "got \(shortSnap.legalRestSeconds)")
-        check("Work includes full day work", abs(shortSnap.workSeconds - 4 * 3600) < 1)
+        check("Work includes full day work", abs(shortSnap.workSeconds - 4 * 3600) < 1, "got \(shortSnap.workSeconds)")
 
         // Over cap → negative remaining
         let overEntries: [WorkRestEntry] = [
