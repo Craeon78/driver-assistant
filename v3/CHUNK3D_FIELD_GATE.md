@@ -1,28 +1,36 @@
 # V3 Chunk 3d — Field / Real-Shift Gate
 
-Status: HARNESS READY (truck evidence pending)
+Status: TEMPORAL MODEL UPDATED — structural gate available without overnight wait
 Owner: Driver
-Authority: CHUNK3_DRIVER_TRUTH.md (roadmap gate)
+Authority: CHUNK3_DRIVER_TRUTH.md + 2026-09-16 field temporal review
 
-## Goal
-Close the Chunk 3 roadmap gate with real evidence.
+## Field finding
+Rest 20:45 → 03:24 is **6:39 continuous** (episode) but calendar **current day** legal rest is **3:24** (from midnight). Both are correct. Do not patch one into the other.
 
-## Harness
-`FieldGateHarnessView` — point ContentView at it (file ends with `typealias ContentView = FieldGateHarnessView`, or paste the same pattern as other gates).
+## Temporal views (one ledger)
+| View | Question |
+|------|----------|
+| Previous calendar day | Logbook yesterday 00:00–24:00 |
+| Current calendar day | Logbook today 00:00–now |
+| Current shift | Driver-declared shift start→end/now (may cross midnight) |
+| Current episode | Uninterrupted open work or rest (crosses midnight) |
+| Rolling / statutory | 24h / 7d / 14d compliance windows |
 
-Ledger is file-backed under Documents (`v3-field-gate-ledger.json`) so kill/relaunch keeps history.
+## Shift definition (locked)
+- **Shift start / end** are explicit driver-declared boundaries (`ShiftBoundary`).
+- They do **not** wipe the work/rest ledger.
+- Shift end does **not** auto-close an open work/rest segment.
+- Shift work/rest = ledger intervals overlapping [shiftStart, shiftEnd or now].
+- If no shift is open, shift metrics are empty (`ShiftSnapshot.none`).
 
-## Checklist
-1. Start Work → leg → End segment  
-2. Start Rest — observe limbo then legal ≥15m  
-3. Kill app mid-open (or Simulate relaunch) — open entry survives  
-4. Daily + rolling cards still match what you did  
-5. Shift end does not wipe ledger  
-6. Optional: overnight-open across morning relaunch  
+## Structural harness (no overnight wait)
+```swift
+print(TemporalModelPlaygroundsRunner.runGate())
+```
+Uses a fabricated 15→16 Sep rest spanning midnight.
 
-## Gate (roadmap)
-Real shifts plus relaunch and overnight-open-shift tests preserve fatigue truth.
+## Live field harness
+`FieldGateHarnessView` — still used for truck evidence; should surface calendar + episode + rolling (update when wiring UI).
 
-## Files
-- FieldGateHarnessView.swift
-- Depends on 3a–3c Driver types already in the playground
+## Roadmap gate
+Real shifts + relaunch + overnight-open still required for full Chunk 3 PASS; temporal structural proof no longer requires waiting overnight twice.
