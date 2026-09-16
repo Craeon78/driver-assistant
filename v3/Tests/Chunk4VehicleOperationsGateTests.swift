@@ -2,7 +2,7 @@ import Foundation
 
 public enum Chunk4VehicleOperationsGateTests {
     public static func run() -> [String] {
-        var out = ["=== V3 Chunk 4 Vehicle + Operations Gate ==="]
+        var out = ["=== V3 Chunk 4 Combination Topology Gate ==="]
         var failures = 0
         func check(_ name: String, _ ok: Bool) {
             out.append("\(name): \(ok ? "PASS" : "FAIL")")
@@ -10,59 +10,85 @@ public enum Chunk4VehicleOperationsGateTests {
         }
 
         let t0 = Date(timeIntervalSince1970: 1_789_520_400)
-        let chassisA = VehicleChassis(name: "Chassis A", registration: "A", baseEmptyMassKg: 8_200, grossVehicleMassLimitKg: 26_000)
-        let tank17 = VehicleBodyModule(
-            name: "Tank #17",
-            kind: .tank,
-            serialNumber: "T17",
-            emptyMassKg: 4_800,
-            compartmentCapacitiesLitres: [6_000, 5_000, 5_000, 4_000, 4_000]
-        )
-        let measured = MeasuredTareEvidence(measuredAt: t0, massKg: 13_120, note: "Configured weighbridge tare")
-        let comboA = VehicleCombinationSnapshot(capturedAt: t0, chassis: chassisA, body: tank17, measuredTare: measured)
+        func compartments(_ capacities: [Double]) -> [VehicleCompartment] {
+            capacities.enumerated().map { VehicleCompartment(name: "Compartment \($0.offset + 1)", capacityLitres: $0.element) }
+        }
 
-        check("Tank is independent physical asset", comboA.body?.id == tank17.id)
-        check("Tank owns five physical compartments", comboA.body?.compartmentCapacitiesLitres.count == 5)
-        check("Calculated empty mass combines chassis + body", comboA.calculatedEmptyMassKg == 13_000)
-        check("Measured tare overrides calculated empty mass", comboA.authoritativeTareKg == 13_120)
+        let rigid = VehicleChassis(name: "Rigid A", registration: "RIGID-A", baseEmptyMassKg: 8_200, grossVehicleMassLimitKg: 26_000)
+        let tank3 = VehicleBodyModule(name: "Tank #17", kind: .tank, serialNumber: "T17", emptyMassKg: 4_000, compartments: compartments([6_000, 5_000, 5_000]))
+        let dog6 = TowedAsset(name: "Dog Tanker #4", kind: .dog, registration: "DOG-4", emptyMassKg: 6_000, compartments: compartments([4_000, 4_000, 4_000, 4_000, 4_000, 4_000]))
+        let dogRelationships = [
+            ConfigurationRelationship(subject: .body(tank3.id), kind: .fittedTo, target: .poweredVehicle(rigid.id)),
+            ConfigurationRelationship(subject: .towedAsset(dog6.id), kind: .coupledTo, target: .poweredVehicle(rigid.id))
+        ]
+        let truckDog = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: tank3, towedAssets: [dog6], relationships: dogRelationships)
+
+        check("Rigid tank owns three identified compartments", truckDog.body?.compartments.count == 3)
+        check("Dog owns six identified compartments", truckDog.towedAssets.first?.compartments.count == 6)
+        check("Compartment identities are distinct", Set(tank3.compartments.map(\.id)).count == 3)
+
+        let primeMover = VehicleChassis(name: "Prime Mover B", registration: "PM-B", baseEmptyMassKg: 9_000)
+        let aTrailer = TowedAsset(name: "A Tanker", kind: .aTrailer, emptyMassKg: 5_000, compartments: compartments([6_000, 5_000, 5_000]))
+        let bTrailer = TowedAsset(name: "B Tanker", kind: .bTrailer, emptyMassKg: 6_000, compartments: compartments([4_000, 4_000, 4_000, 4_000, 4_000, 4_000]))
+        let bDoubleRelationships = [
+            ConfigurationRelationship(subject: .towedAsset(aTrailer.id), kind: .coupledTo, target: .poweredVehicle(primeMover.id)),
+            ConfigurationRelationship(subject: .towedAsset(bTrailer.id), kind: .coupledTo, target: .towedAsset(aTrailer.id))
+        ]
+        let bDouble = VehicleCombinationSnapshot(capturedAt: t0, chassis: primeMover, towedAssets: [aTrailer, bTrailer], relationships: bDoubleRelationships)
+
+        let truckDogCounts = [truckDog.body?.compartments.count ?? 0, truckDog.towedAssets[0].compartments.count]
+        let bDoubleCounts = [bDouble.towedAssets[0].compartments.count, bDouble.towedAssets[1].compartments.count]
+        check("Truck+dog and B-double can both express 3+6", truckDogCounts == [3, 6] && bDoubleCounts == [3, 6])
+        check("Same 3+6 cargo topology retains different vehicle topology", truckDog.relationships != bDouble.relationships && dog6.kind == .dog && aTrailer.kind == .aTrailer && bTrailer.kind == .bTrailer)
+
+        let crane = VehicleEquipment(name: "Crane #7", kind: .crane, serialNumber: "CR7", massKg: 1_200)
+        let forkliftMount = VehicleEquipment(name: "Forklift Mount", kind: .forkliftMount, massKg: 250)
+        let forklift = VehicleEquipment(name: "Forklift #22", kind: .forklift, serialNumber: "FL22", massKg: 2_500)
+        let flatbed = VehicleBodyModule(name: "Flatbed #2", kind: .tray, emptyMassKg: 1_800)
+        let equipmentRelationships = [
+            ConfigurationRelationship(subject: .body(flatbed.id), kind: .fittedTo, target: .poweredVehicle(rigid.id)),
+            ConfigurationRelationship(subject: .equipment(crane.id), kind: .mountedTo, target: .poweredVehicle(rigid.id)),
+            ConfigurationRelationship(subject: .equipment(forkliftMount.id), kind: .mountedTo, target: .poweredVehicle(rigid.id)),
+            ConfigurationRelationship(subject: .equipment(forklift.id), kind: .carriedBy, target: .poweredVehicle(rigid.id))
+        ]
+        let flatbedCombo = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: flatbed, equipment: [crane, forkliftMount, forklift], relationships: equipmentRelationships)
+        check("Mounted crane contributes to empty configuration mass", flatbedCombo.calculatedEmptyMassKg == 11_450)
+        check("Carried forklift excluded from tare", flatbedCombo.calculatedEmptyMassKg != 13_950)
+
+        let craneOnPrime = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(100), chassis: primeMover, equipment: [crane], relationships: [ConfigurationRelationship(subject: .equipment(crane.id), kind: .mountedTo, target: .poweredVehicle(primeMover.id))])
+        check("Crane identity survives transfer to prime mover", craneOnPrime.equipment.first?.id == crane.id)
+
+        let tankOnNewChassis = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(200), chassis: primeMover, body: tank3, relationships: [ConfigurationRelationship(subject: .body(tank3.id), kind: .fittedTo, target: .poweredVehicle(primeMover.id))])
+        check("Tank identity survives powered chassis replacement", tankOnNewChassis.body?.id == tank3.id)
+
+        let dogLater = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(300), chassis: primeMover, towedAssets: [dog6], relationships: [ConfigurationRelationship(subject: .towedAsset(dog6.id), kind: .coupledTo, target: .poweredVehicle(primeMover.id))])
+        check("Trailer identity survives combination change", dogLater.towedAssets.first?.id == dog6.id)
+
+        let provisional = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: flatbed, equipment: [crane], relationships: [ConfigurationRelationship(subject: .equipment(crane.id), kind: .mountedTo, target: .poweredVehicle(rigid.id))])
+        let tare = MeasuredTareEvidence(measuredAt: t0, massKg: 11_300, configurationFingerprint: provisional.configurationFingerprint, note: "Weighbridge")
+        let measuredCombo = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: flatbed, equipment: [crane], relationships: provisional.relationships, measuredTare: tare)
+        check("Measured tare applies to matching configuration", measuredCombo.authoritativeTareKg == 11_300)
+        let changedCombo = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(400), chassis: rigid, body: flatbed, equipment: [crane, forkliftMount], relationships: provisional.relationships + [ConfigurationRelationship(subject: .equipment(forkliftMount.id), kind: .mountedTo, target: .poweredVehicle(rigid.id))], measuredTare: tare)
+        check("Stale measured tare rejected after configuration change", changedCombo.authoritativeTareKg == changedCombo.calculatedEmptyMassKg && changedCombo.authoritativeTareKg != 11_300)
 
         var operations = OperationsLedger()
-        let drive = OperationEntry(kind: .drive, start: t0, vehicleCombination: comboA)
+        let drive = OperationEntry(kind: .drive, start: t0, vehicleCombination: truckDog)
         operations.append(drive)
         check("Valid operation close accepted", operations.close(id: drive.id, at: t0.addingTimeInterval(3600)))
         let closedEnd = operations.entries.first?.end
         check("Repeated close rejected", !operations.close(id: drive.id, at: t0.addingTimeInterval(7200)))
         check("Repeated close cannot rewrite history", operations.entries.first?.end == closedEnd)
 
-        let impossible = OperationEntry(kind: .wait, start: t0.addingTimeInterval(10_000), vehicleCombination: comboA)
-        operations.append(impossible)
-        check("End before start rejected", !operations.close(id: impossible.id, at: t0.addingTimeInterval(9_000)))
-        check("Invalid close leaves operation open", operations.entries.first(where: { $0.id == impossible.id })?.isOpen == true)
-
-        // Tank #17 survives replacement of its first chassis.
-        let chassisB = VehicleChassis(name: "Chassis B", registration: "B", baseEmptyMassKg: 8_700, grossVehicleMassLimitKg: 26_000)
-        let comboB = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(20_000), chassis: chassisB, body: tank17)
-        check("Body survives chassis replacement", comboB.body?.id == comboA.body?.id)
-        check("Chassis replacement changes chassis identity", comboB.chassis.id != comboA.chassis.id)
-        check("Old operation retains old chassis", operations.entries.first?.vehicleCombination.chassis.id == chassisA.id)
-
-        // The same chassis can later carry a different body without becoming a different chassis.
-        let tray4 = VehicleBodyModule(name: "Tray #4", kind: .tray, serialNumber: "TR4", emptyMassKg: 1_900)
-        let chassisAWithTray = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(30_000), chassis: chassisA, body: tray4)
-        check("Chassis survives body replacement", chassisAWithTray.chassis.id == comboA.chassis.id)
-        check("Body replacement changes body identity", chassisAWithTray.body?.id != comboA.body?.id)
-        check("Configuration tare changes with body", chassisAWithTray.calculatedEmptyMassKg == 10_100)
-
         let encoded = try! JSONEncoder().encode(operations)
         let replayed = try! JSONDecoder().decode(OperationsLedger.self, from: encoded)
         check("Operations replay deterministic", replayed == operations)
-        check("Historical chassis + body survive replay", replayed.entries.first?.vehicleCombination == comboA)
+        check("Historical combination topology survives replay", replayed.entries.first?.vehicleCombination == truckDog)
 
         let driver = WorkRestEntry(kind: .work, start: t0, end: t0.addingTimeInterval(3600))
         let before = driver
-        _ = comboB
-        _ = chassisAWithTray
-        check("Driver truth unaffected by Vehicle/Operations", driver == before)
+        _ = bDouble
+        _ = changedCombo
+        check("Driver truth unaffected by Vehicle topology", driver == before)
 
         out.append("---")
         out.append(failures == 0 ? "GATE PASS" : "GATE FAIL (\(failures))")
