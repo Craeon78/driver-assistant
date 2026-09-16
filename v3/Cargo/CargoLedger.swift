@@ -66,7 +66,7 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         if transaction.kind == .correction { try validateCorrection(transaction) }
         var candidate = transactions
         candidate.append(transaction)
-        try Self.project(limits: limits, transactions: candidate)
+        _ = try Self.project(limits: limits, transactions: candidate)
         transactions.append(transaction)
         transactions.sort(by: Self.order)
     }
