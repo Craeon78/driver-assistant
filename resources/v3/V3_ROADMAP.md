@@ -33,12 +33,12 @@ Gate: **PASS** — foundation harness plus 3.5a Long-period Standard Hours, 3.5b
 
 Scope note: Standard Hours is the first policy implementation. BFM/AFM/other schemes remain policy variants/deferred unless separately promoted; the architecture must not bake Standard Hours assumptions into Driver truth. Passing Chunk 3.5 is an engineering gate, not NHVR certification of an EWD.
 
-## 4. Vehicle + Operations — UNBLOCKED
-Vehicle model with current rigid and truck/quad-dog fixtures; independent Driver/Vehicle/Operations state.
+## 4. Vehicle + Operations — PASS (2026-09-16)
+Vehicle model with rigid and truck/quad-dog fixtures; independent Driver/Vehicle/Operations state; modular powered chassis/body/towed-asset/equipment topology; axle groups/ratings; configuration-bound tare; and powered-vehicle attribution of authoritative Chunk 2 ODO/distance evidence.
 
-Gate: simultaneous truths coexist. The second vehicle fixture must not require Core/Driver/Operations redesign.
+Gate: **PASS** — simultaneous Driver/Vehicle/Operations truths coexist; a materially different second vehicle attaches without Core/Driver/Operations redesign; historical topology and operations replay; cross-vehicle ODO spans are stopped before distance-engine commit; distance evidence remains vehicle-matched and single-use. See `v3/CHUNK4_VEHICLE_OPERATIONS.md`.
 
-## 5. Cargo/Fuel + modularity proof
+## 5. Cargo/Fuel + modularity proof — UNBLOCKED
 Journal replay harness; Site Library; Runs/What's Next shell; Fuel migration to new contracts; Vehicle Mass and Fuel Cargo integration.
 
 Gate A: complete real fuel-delivery shift on V3.
