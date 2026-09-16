@@ -3,13 +3,12 @@ import SwiftUI
 public struct Chunk4VehicleOperationsHarnessView: View {
     private let lines = Chunk4VehicleOperationsGateTests.run()
     public init() {}
-
     public var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Chunk 4 — Vehicle + Operations").font(.title2.bold())
-                    Text("Axles • ratings • deterministic configuration • tare semantics • replay").font(.caption).foregroundStyle(.secondary)
+                    Text("Chunk 2 ↔ Chunk 4 Integration").font(.title2.bold())
+                    Text("Pre-commit vehicle boundary • authoritative ODO • single-use distance evidence • replay").font(.caption).foregroundStyle(.secondary)
                     Divider()
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -18,11 +17,8 @@ public struct Chunk4VehicleOperationsHarnessView: View {
                             Text(line).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                         }
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-            }
-            .navigationTitle("Driver Assistant V3")
+                }.frame(maxWidth: .infinity, alignment: .leading).padding()
+            }.navigationTitle("Driver Assistant V3")
         }
     }
 }

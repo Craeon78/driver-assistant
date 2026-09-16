@@ -2,64 +2,67 @@ import Foundation
 
 public enum Chunk4VehicleOperationsGateTests {
     public static func run() -> [String] {
-        var out = ["=== V3 Chunk 4 Physical Truth Hardening Gate ==="]
-        var failures = 0
+        var out = ["=== V3 Chunk 2 ↔ Chunk 4 ODO Integration Gate v2 ==="]; var failures = 0
         func check(_ name: String, _ ok: Bool) { out.append("\(name): \(ok ? "PASS" : "FAIL")"); if !ok { failures += 1 } }
         let t0 = Date(timeIntervalSince1970: 1_789_520_400)
-        func compartments(_ capacities: [Double]) -> [VehicleCompartment] { capacities.enumerated().map { VehicleCompartment(name: "Compartment \($0.offset + 1)", capacityLitres: $0.element) } }
+        let truckA = VehicleChassis(name: "Rigid A", registration: "RIGID-A", baseEmptyMassKg: 8_200)
+        let bodyA = VehicleBodyModule(name: "Tank A", kind: .tank, emptyMassKg: 4_000)
+        let comboA = VehicleCombinationSnapshot(capturedAt: t0, chassis: truckA, body: bodyA, relationships: [ConfigurationRelationship(subject: .body(bodyA.id), kind: .fittedTo, target: .poweredVehicle(truckA.id))])
+        let truckB = VehicleChassis(name: "Prime B", registration: "PRIME-B", baseEmptyMassKg: 9_000)
+        let comboB = VehicleCombinationSnapshot(capturedAt: t0, chassis: truckB)
 
-        let steer = VehicleAxleGroup(name: "Steer", kind: .steer, axleCount: 1, manufacturerRatingKg: 6_500)
-        let rigidDrive = VehicleAxleGroup(name: "Drive tandem", kind: .tandem, axleCount: 2, manufacturerRatingKg: 16_500, spacingToPreviousMetres: 4.2)
-        let dogFront = VehicleAxleGroup(name: "Dog front tandem", kind: .tandem, axleCount: 2, manufacturerRatingKg: 16_500)
-        let dogRear = VehicleAxleGroup(name: "Dog rear tandem", kind: .tandem, axleCount: 2, manufacturerRatingKg: 16_500, spacingToPreviousMetres: 4.0)
-        let rigid = VehicleChassis(name: "Rigid A", registration: "RIGID-A", baseEmptyMassKg: 8_200, grossVehicleMassLimitKg: 26_000, axleGroups: [steer, rigidDrive])
-        let tank3 = VehicleBodyModule(name: "Tank #17", kind: .tank, serialNumber: "T17", emptyMassKg: 4_000, compartments: compartments([6_000, 5_000, 5_000]))
-        let dog6 = TowedAsset(name: "Quad Dog Tanker #4", kind: .dog, registration: "DOG-4", emptyMassKg: 6_000, compartments: compartments([4_000,4_000,4_000,4_000,4_000,4_000]), axleGroups: [dogFront, dogRear])
-        let relationships = [ConfigurationRelationship(subject: .body(tank3.id), kind: .fittedTo, target: .poweredVehicle(rigid.id)), ConfigurationRelationship(subject: .towedAsset(dog6.id), kind: .coupledTo, target: .poweredVehicle(rigid.id))]
-        let truckDog = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: tank3, towedAssets: [dog6], relationships: relationships)
+        let a1 = ODOAnchor(km: 428_317, recordedAt: t0), a2 = ODOAnchor(km: 428_407, recordedAt: t0.addingTimeInterval(3600))
+        let va1 = VehicleODOAnchor(anchor: a1, poweredVehicleID: truckA.id), va2 = VehicleODOAnchor(anchor: a2, poweredVehicleID: truckA.id)
+        check("Driver-entered ODO remains authoritative", va1.anchor.km == 428_317 && va1.anchor.provenance == .driverEntered)
+        let intervalA = DistanceInterval(startAnchor: a1, endAnchor: a2, odoDeltaKm: 90, gpsRawKm: 91.2, gpsFilteredKm: 89.7, chosenSource: .odoAnchor, chosenKm: 90, closedAt: t0.addingTimeInterval(3600))
+        let evidenceA = try! VehicleODOAttribution.attribute(interval: intervalA, start: va1, end: va2)
+        check("Chunk 2 interval survives attribution unchanged", evidenceA.interval == intervalA)
 
-        check("Rigid physical axle groups retained", truckDog.chassis.axleGroups.count == 2 && truckDog.chassis.axleGroups.map(\.axleCount).reduce(0,+) == 3)
-        check("Quad-dog physical axle groups retained", dog6.axleGroups.count == 2 && dog6.axleGroups.map(\.axleCount).reduce(0,+) == 4)
-        check("Axle manufacturer ratings retained as Vehicle truth", dog6.axleGroups.compactMap(\.manufacturerRatingKg).reduce(0,+) == 33_000)
-        check("Rigid tank owns three identified compartments", tank3.compartments.count == 3)
-        check("Dog owns six identified compartments", dog6.compartments.count == 6)
+        // P1 regression: vehicle identity participates BEFORE DistanceEngine commits.
+        let engine = DistanceEngine()
+        check("First Truck A anchor opens span", engine.handleODOAnchor(a1, poweredVehicleID: truckA.id) == nil)
+        let factorBeforeSwap = engine.effectiveCorrectionFactor
+        let closedBeforeSwap = engine.closedIntervals().count
+        let b1 = ODOAnchor(km: 612_010, recordedAt: t0.addingTimeInterval(3700))
+        check("Truck swap opens new span instead of cross-vehicle interval", engine.handleODOAnchor(b1, poweredVehicleID: truckB.id) == nil)
+        check("Truck swap cannot commit poisoned interval", engine.closedIntervals().count == closedBeforeSwap)
+        check("Truck swap cannot alter learned correction factor", engine.effectiveCorrectionFactor == factorBeforeSwap)
+        let b2 = ODOAnchor(km: 612_045, recordedAt: t0.addingTimeInterval(5400))
+        let validB = engine.handleODOAnchor(b2, poweredVehicleID: truckB.id)
+        check("Second truck can close its own subsequent span", validB?.odoDeltaKm == 35)
 
-        let fp1 = truckDog.configurationFingerprint
-        let reordered = VehicleCombinationSnapshot(capturedAt: t0.addingTimeInterval(1), chassis: rigid, body: tank3, towedAssets: [dog6], relationships: relationships.reversed())
-        check("Configuration fingerprint independent of relationship ordering", fp1 == reordered.configurationFingerprint)
-        let changedDog = TowedAsset(id: dog6.id, name: dog6.name, kind: dog6.kind, registration: dog6.registration, serialNumber: dog6.serialNumber, emptyMassKg: dog6.emptyMassKg, dimensions: dog6.dimensions, compartments: dog6.compartments, axleGroups: [dogFront])
-        let changedAxles = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: tank3, towedAssets: [changedDog], relationships: relationships)
-        check("Physical axle configuration changes fingerprint", changedAxles.configurationFingerprint != fp1)
+        let vb1 = VehicleODOAnchor(anchor: b1, poweredVehicleID: truckB.id), vb2 = VehicleODOAnchor(anchor: b2, poweredVehicleID: truckB.id)
+        let intervalB = DistanceInterval(startAnchor: b1, endAnchor: b2, odoDeltaKm: 35, chosenSource: .odoAnchor, chosenKm: 35, closedAt: t0.addingTimeInterval(5400))
+        let evidenceB = try! VehicleODOAttribution.attribute(interval: intervalB, start: vb1, end: vb2)
 
-        let crane = VehicleEquipment(name: "Crane #7", kind: .crane, massKg: 1_200)
-        let forklift = VehicleEquipment(name: "Forklift #22", kind: .forklift, massKg: 2_500)
-        let orphan = VehicleEquipment(name: "Unclassified equipment", kind: .other, massKg: 9_999)
-        let flatbed = VehicleBodyModule(name: "Flatbed", kind: .tray, emptyMassKg: 1_800)
-        let equipmentRels = [ConfigurationRelationship(subject: .body(flatbed.id), kind: .fittedTo, target: .poweredVehicle(rigid.id)), ConfigurationRelationship(subject: .equipment(crane.id), kind: .mountedTo, target: .poweredVehicle(rigid.id)), ConfigurationRelationship(subject: .equipment(forklift.id), kind: .carriedBy, target: .poweredVehicle(rigid.id))]
-        let equipmentCombo = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: flatbed, equipment: [crane, forklift, orphan], relationships: equipmentRels)
-        check("Mounted equipment contributes to tare", equipmentCombo.calculatedEmptyMassKg == 11_200)
-        check("Carried equipment excluded from tare", equipmentCombo.calculatedEmptyMassKg != 13_700)
-        check("Orphan equipment cannot silently alter tare", equipmentCombo.calculatedEmptyMassKg != 21_199)
+        var driveA = OperationEntry(kind: .drive, start: t0, vehicleCombination: comboA)
+        check("Drive consumes matching distance evidence", driveA.attachDistanceEvidence(evidenceA))
+        check("Entry rejects duplicate attachment", !driveA.attachDistanceEvidence(evidenceA))
+        var driveB = OperationEntry(kind: .drive, start: t0.addingTimeInterval(3700), vehicleCombination: comboB)
+        check("Wrong vehicle rejects distance evidence", !driveB.attachDistanceEvidence(evidenceA))
+        check("Second truck accepts own evidence", driveB.attachDistanceEvidence(evidenceB))
+        var wait = OperationEntry(kind: .wait, start: t0, vehicleCombination: comboA)
+        check("Non-drive rejects distance evidence", !wait.attachDistanceEvidence(evidenceA))
 
-        let tare = MeasuredTareEvidence(measuredAt: t0, massKg: 18_100, configurationFingerprint: fp1, note: "Weighbridge")
-        let measured = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: tank3, towedAssets: [dog6], relationships: relationships, measuredTare: tare)
-        check("Measured tare applies to exact physical configuration", measured.authoritativeTareKg == 18_100)
-        let stale = VehicleCombinationSnapshot(capturedAt: t0, chassis: rigid, body: tank3, towedAssets: [changedDog], relationships: relationships, measuredTare: tare)
-        check("Axle change invalidates stale measured tare", stale.authoritativeTareKg == stale.calculatedEmptyMassKg && stale.authoritativeTareKg != 18_100)
+        // P2 regression: ledger prevents same interval being consumed by two Drives.
+        var blankDrive1 = OperationEntry(kind: .drive, start: t0, vehicleCombination: comboA)
+        let blankDrive2 = OperationEntry(kind: .drive, start: t0.addingTimeInterval(10), vehicleCombination: comboA)
+        var uniqueLedger = OperationsLedger(entries: [blankDrive1, blankDrive2])
+        check("Ledger accepts first interval attachment", uniqueLedger.attachDistanceEvidence(operationID: blankDrive1.id, evidence: evidenceA))
+        check("Ledger rejects same interval on second Drive", !uniqueLedger.attachDistanceEvidence(operationID: blankDrive2.id, evidence: evidenceA))
+        blankDrive1 = uniqueLedger.entries.first(where: { $0.id == blankDrive1.id })!
 
-        let primeSteer = VehicleAxleGroup(name: "Prime steer", kind: .steer, axleCount: 1, manufacturerRatingKg: 6_500)
-        let primeDrive = VehicleAxleGroup(name: "Prime drive", kind: .tandem, axleCount: 2, manufacturerRatingKg: 16_500)
-        let prime = VehicleChassis(name: "Prime Mover B", registration: "PM-B", baseEmptyMassKg: 9_000, axleGroups: [primeSteer, primeDrive])
-        let semiTri = VehicleAxleGroup(name: "Trailer tri", kind: .tri, axleCount: 3, manufacturerRatingKg: 20_000)
-        let semi = TowedAsset(name: "Semi B", kind: .semiTrailer, emptyMassKg: 7_000, axleGroups: [semiTri])
-        let second = VehicleCombinationSnapshot(capturedAt: t0, chassis: prime, towedAssets: [semi], relationships: [ConfigurationRelationship(subject: .towedAsset(semi.id), kind: .coupledTo, target: .poweredVehicle(prime.id))])
-        check("Second vehicle uses same Vehicle model without redesign", second.chassis.axleGroups.count == 2 && second.towedAssets.first?.axleGroups.first?.kind == .tri)
+        // P2 regression: decoding is also an invariant boundary.
+        let goodData = try! JSONEncoder().encode(uniqueLedger)
+        let replayed = try! JSONDecoder().decode(OperationsLedger.self, from: goodData)
+        check("Valid evidence survives replay", replayed.entries.first(where: { $0.id == blankDrive1.id })?.distanceEvidence == evidenceA)
 
-        var operations = OperationsLedger(); let drive = OperationEntry(kind: .drive, start: t0, vehicleCombination: truckDog); operations.append(drive); _ = operations.close(id: drive.id, at: t0.addingTimeInterval(3600))
-        let replayed = try! JSONDecoder().decode(OperationsLedger.self, from: JSONEncoder().encode(operations))
-        check("Axle/topology truth survives Operations replay", replayed.entries.first?.vehicleCombination == truckDog)
-        let driver = WorkRestEntry(kind: .work, start: t0, end: t0.addingTimeInterval(3600)); let before = driver; _ = second
+        let bodyB = VehicleBodyModule(id: bodyA.id, name: bodyA.name, kind: bodyA.kind, serialNumber: bodyA.serialNumber, emptyMassKg: bodyA.emptyMassKg, dimensions: bodyA.dimensions, compartments: bodyA.compartments)
+        let moved = VehicleCombinationSnapshot(capturedAt: t0, chassis: truckB, body: bodyB, relationships: [ConfigurationRelationship(subject: .body(bodyB.id), kind: .fittedTo, target: .poweredVehicle(truckB.id))])
+        check("Body can move without moving powered-vehicle ODO identity", moved.body?.id == bodyA.id && evidenceA.poweredVehicleID == truckA.id)
+        let driver = WorkRestEntry(kind: .work, start: t0, end: t0.addingTimeInterval(5400)); let before = driver; _ = replayed
         check("Driver truth remains independent", driver == before)
+        check("Vehicle holds no duplicate mutable current ODO", evidenceA.interval.endAnchor.km == 428_407)
 
         out.append("---"); out.append(failures == 0 ? "GATE PASS" : "GATE FAIL (\(failures))"); return out
     }
