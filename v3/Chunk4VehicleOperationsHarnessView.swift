@@ -8,8 +8,8 @@ public struct Chunk4VehicleOperationsHarnessView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Chunk 4 — Vehicle + Operations").font(.title2.bold())
-                    Text("Axles • ratings • deterministic configuration • tare semantics • replay").font(.caption).foregroundStyle(.secondary)
+                    Text("Chunk 2 ↔ Chunk 4 Integration").font(.title2.bold())
+                    Text("Authoritative ODO • powered-vehicle attribution • distance evidence • Operations consumption • replay").font(.caption).foregroundStyle(.secondary)
                     Divider()
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
