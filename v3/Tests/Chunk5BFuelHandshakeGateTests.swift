@@ -5,8 +5,8 @@ import Foundation
 public enum Chunk5BFuelHandshakeGateTests {
     public static func run() -> [String] {
         var results: [String] = ["=== V3 Chunk 5B Fuel/Cargo Handshake Gate ==="]
-        let fuelResults = TestFuel.run()
-        results.append(contentsOf: fuelResults)
+        results.append(contentsOf: TestFuel.run())
+        results.append(contentsOf: Chunk5BFuelMassProjectionTests.run())
 
         // 5A must remain healthy after Fuel is introduced. This is deliberately
         // called rather than copied so the original non-fuel contract stays the tripwire.
