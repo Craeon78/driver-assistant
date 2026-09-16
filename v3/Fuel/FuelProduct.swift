@@ -1,7 +1,6 @@
 import Foundation
 
-/// Fuel-specific product identity and physical metadata.
-/// The generic Cargo layer sees only the adapted CargoKind.
+/// Fuel-specific stable product identity. Load density is evidence, not identity.
 public enum FuelFamily: String, Codable, Sendable, CaseIterable {
     case diesel
     case petrol
@@ -12,38 +11,48 @@ public struct FuelProduct: Identifiable, Codable, Sendable, Equatable {
     public var name: String
     public var code: String
     public var family: FuelFamily
-    /// kg/L for the applicable load. This is physical conversion data, not cargo quantity truth.
-    public var kilogramsPerLitre: Double
 
     public init(
         id: CanonicalID = .fresh(),
         name: String,
         code: String,
-        family: FuelFamily,
-        kilogramsPerLitre: Double
+        family: FuelFamily
     ) {
         self.id = id
         self.name = name
         self.code = code
         self.family = family
-        self.kilogramsPerLitre = kilogramsPerLitre
     }
 
+    /// Stable generic Cargo identity. Density deliberately stays nil so two loads of
+    /// the same fuel remain the same CargoKind even when their observed density differs.
     public var cargoKind: CargoKind {
         CargoKind(
             id: id,
             name: name,
             kind: "fuel.\(code.lowercased())",
             unitName: "L",
-            kilogramsPerUnit: kilogramsPerLitre
+            kilogramsPerUnit: nil
         )
     }
 }
 
+/// Physical evidence attached to a particular load, not to enduring product identity.
+public struct FuelLoadEvidence: Codable, Sendable, Equatable {
+    public let kilogramsPerLitre: Double
+    public let sourceDescription: String?
+
+    public init(kilogramsPerLitre: Double, sourceDescription: String? = nil) {
+        self.kilogramsPerLitre = kilogramsPerLitre
+        self.sourceDescription = sourceDescription
+    }
+
+    public func massKg(forLitres litres: Double) -> Double {
+        litres * kilogramsPerLitre
+    }
+}
+
 public enum FuelCatalogue {
-    /// Catalogue values intentionally omit default density. Density/SG is load evidence,
-    /// not a universal product constant. Callers construct the applicable FuelProduct
-    /// using terminal/load evidence before committing cargo truth.
     public static let supportedNames: [(name: String, code: String, family: FuelFamily)] = [
         ("Diesel", "diesel", .diesel),
         ("Ultimate Diesel", "xls", .diesel),
