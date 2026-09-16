@@ -21,7 +21,7 @@ public enum Chunk5CargoFoundationGateTests {
         check("Overfill rejected", fails { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 6000, destinationCompartmentID: c1, occurredAt: t0)) })
         check("Negative inventory rejected", fails { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .unload, cargo: cargo, units: 1, sourceCompartmentID: c1, occurredAt: t0)) })
         check("Mixed cargo cannot silently relabel compartment", fails { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 500, destinationCompartmentID: c1, occurredAt: t0)); try l.append(CargoTransaction(kind: .load, cargo: other, units: 1, destinationCompartmentID: c1, occurredAt: t0.addingTimeInterval(1))) })
-        check("Transfer conserves cargo", succeeds { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 1000, destinationCompartmentID: c1, occurredAt: t0)); try l.append(CargoTransaction(kind: .transfer, cargo: cargo, units: 400, sourceCompartmentID: c1, destinationCompartmentID: c2, occurredAt: t0.addingTimeInterval(1))); return try l.state(compartmentID: c1).quantity?.units == 600 && l.state(compartmentID: c2).quantity?.units == 400 })
+        check("Transfer conserves cargo", succeeds { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 1000, destinationCompartmentID: c1, occurredAt: t0)); try l.append(CargoTransaction(kind: .transfer, cargo: cargo, units: 400, sourceCompartmentID: c1, destinationCompartmentID: c2, occurredAt: t0.addingTimeInterval(1))); let left = try l.state(compartmentID: c1).quantity?.units; let right = try l.state(compartmentID: c2).quantity?.units; return left == 600 && right == 400 })
         check("Unload derives remaining balance", succeeds { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 1000, destinationCompartmentID: c1, occurredAt: t0)); try l.append(CargoTransaction(kind: .unload, cargo: cargo, units: 250, sourceCompartmentID: c1, occurredAt: t0.addingTimeInterval(1))); return try l.state(compartmentID: c1).quantity?.units == 750 })
         check("Cargo mass is derived separately from tare", succeeds { var l = try CargoLedger(limits: limits); try l.append(CargoTransaction(kind: .load, cargo: cargo, units: 1000, destinationCompartmentID: c1, occurredAt: t0)); return try l.currentCargoMassKg() == 2000 })
 
@@ -31,7 +31,14 @@ public enum Chunk5CargoFoundationGateTests {
             try l.append(tx); try l.append(tx)
         })
 
-        check("Correction retains original transaction", succeeds { var l = try CargoLedger(limits: limits); let load = CargoTransaction(kind: .load, cargo: cargo, units: 100, destinationCompartmentID: c1, occurredAt: t0); try l.append(load); try l.append(CargoTransaction(kind: .correction, cargo: cargo, units: 100, sourceCompartmentID: c1, occurredAt: t0.addingTimeInterval(1), correctsTransactionID: load.id)); return l.transactions.count == 2 && (try l.state(compartmentID: c1).quantity == nil) })
+        check("Correction retains original transaction", succeeds {
+            var l = try CargoLedger(limits: limits)
+            let load = CargoTransaction(kind: .load, cargo: cargo, units: 100, destinationCompartmentID: c1, occurredAt: t0)
+            try l.append(load)
+            try l.append(CargoTransaction(kind: .correction, cargo: cargo, units: 100, sourceCompartmentID: c1, occurredAt: t0.addingTimeInterval(1), correctsTransactionID: load.id))
+            let empty = try l.state(compartmentID: c1).quantity == nil
+            return l.transactions.count == 2 && empty
+        })
 
         check("Correction rejects descriptor drift", fails {
             var l = try CargoLedger(limits: limits)
