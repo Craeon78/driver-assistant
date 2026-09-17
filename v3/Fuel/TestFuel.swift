@@ -82,7 +82,13 @@ public enum TestFuel {
             var committed = try FuelCargoAdapter.committing(first, to: empty)
             let second = FuelCargoAdapter.prepareLoad(product: diesel, litres: 500, evidence: densityB, into: c1, occurredAt: now.addingTimeInterval(1))
             committed = try FuelCargoAdapter.committing(second, to: committed)
-            return committed.ledger.transactions.count == 2 && committed.loadEvidence.count == 2 && committed.loadEvidence[0].evidence.massKg(forLitres: 1_000) == 840 && committed.loadEvidence[1].evidence.massKg(forLitres: 500) == 415 && (try committed.ledger.state(compartmentID: c1).quantity?.units == 1_500)
+            let finalState = try committed.ledger.state(compartmentID: c1)
+
+            return committed.ledger.transactions.count == 2 &&
+                committed.loadEvidence.count == 2 &&
+                committed.loadEvidence[0].evidence.massKg(forLitres: 1_000) == 840 &&
+                committed.loadEvidence[1].evidence.massKg(forLitres: 500) == 415 &&
+                finalState.quantity?.units == 1_500
         }
 
         check("transfer establishes destination Fuel residue history") {
@@ -100,7 +106,10 @@ public enum TestFuel {
             var committed = try FuelCargoAdapter.committing(FuelCargoAdapter.prepareLoad(product: diesel, litres: 3_600, evidence: densityA, into: c1, occurredAt: now), to: empty)
             let runningTank = FuelCargoAdapter.delivery(product: diesel, litres: 300, from: c1, occurredAt: now.addingTimeInterval(1), destinationDescription: "Customer: Vehicle / Running Tank")
             try committed.ledger.append(runningTank)
-            return runningTank.kind == .unload && (try committed.ledger.state(compartmentID: c1).quantity?.units == 3_300)
+            let finalState = try committed.ledger.state(compartmentID: c1)
+
+            return runningTank.kind == .unload &&
+                finalState.quantity?.units == 3_300
         }
 
         check("correction preserves original and provenance") {
@@ -109,7 +118,12 @@ public enum TestFuel {
             try ledger.append(wrong)
             let correction = FuelCargoAdapter.correction(of: wrong, occurredAt: now.addingTimeInterval(1), note: "Recorded quantity wrong")
             try ledger.append(correction)
-            return ledger.transactions.count == 2 && correction.correctsTransactionID == wrong.id && ledger.transactions[0].id == wrong.id && (try ledger.state(compartmentID: c1).quantity == nil)
+            let finalState = try ledger.state(compartmentID: c1)
+
+            return ledger.transactions.count == 2 &&
+                correction.correctsTransactionID == wrong.id &&
+                ledger.transactions[0].id == wrong.id &&
+                finalState.quantity == nil
         }
 
         check("incident is preserved as incident not correction") {
