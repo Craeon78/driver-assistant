@@ -99,7 +99,7 @@ public final class FieldTestStore: ObservableObject {
             compartmentID: compartmentID, cargo: quantity.cargo,
             calculatedUnitsBefore: quantity.units, confirmedPhysicalUnitsAfter: confirmedPhysicalLitres,
             observedMovementVariance: observedMovementVariance, occurredAt: Date(),
-            provenance: .driverEntered, note: note
+            provenance: .driverEntered, relatedOperationID: nil, note: note
         ))
         _ = try CargoStateReconciler.currentState(
             ledger: snapshot.cargoLedger, reconciliationLog: candidate, compartmentID: compartmentID
