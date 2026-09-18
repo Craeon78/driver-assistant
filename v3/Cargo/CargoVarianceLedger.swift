@@ -81,7 +81,8 @@ public struct CargoVarianceLedger: Codable, Sendable, Equatable {
         if a.recordedAt != b.recordedAt { return a.recordedAt < b.recordedAt }
         return a.id.raw.uuidString < b.id.raw.uuidString
     }
-}\n
+}
+
 public struct CargoReconciliation: Codable, Sendable, Equatable {
     public let id: CanonicalID
     public let compartmentID: CanonicalID
