@@ -48,6 +48,25 @@ public enum Chunk5DVarianceGateTests {
             catch CargoLedgerError.insufficientQuantity { return log.netVariance(cargoID:cargo.id)==79 }
         })
 
+        check("40 -> confirmed 0 -> later load 5000 = exactly 5000", succeeds {
+            var ledger=try CargoLedger(limits:limits)
+            try ledger.append(CargoTransaction(kind:.load,cargo:cargo,units:5501,destinationCompartmentID:compartment,occurredAt:t0))
+            try ledger.append(CargoTransaction(kind:.unload,cargo:cargo,units:5461,sourceCompartmentID:compartment,occurredAt:t0.addingTimeInterval(1)))
+            var log=try CargoReconciliationLog()
+            try log.append(CargoReconciliationEvent(compartmentID:compartment,cargo:cargo,calculatedUnitsBefore:40,confirmedPhysicalUnitsAfter:0,occurredAt:t0.addingTimeInterval(2)))
+            try ledger.append(CargoTransaction(kind:.load,cargo:cargo,units:5000,destinationCompartmentID:compartment,occurredAt:t0.addingTimeInterval(3)))
+            return try CargoStateReconciler.currentState(ledger:ledger,reconciliationLog:log,compartmentID:compartment).quantity?.units == 5000
+        })
+
+        check("False calculated boundary is rejected during replay", succeeds {
+            var ledger=try CargoLedger(limits:limits)
+            try ledger.append(CargoTransaction(kind:.load,cargo:cargo,units:100,destinationCompartmentID:compartment,occurredAt:t0))
+            var log=try CargoReconciliationLog()
+            try log.append(CargoReconciliationEvent(compartmentID:compartment,cargo:cargo,calculatedUnitsBefore:40,confirmedPhysicalUnitsAfter:0,occurredAt:t0.addingTimeInterval(1)))
+            do { _=try CargoStateReconciler.currentState(ledger:ledger,reconciliationLog:log,compartmentID:compartment); return false }
+            catch CargoReconciliationError.staleCalculatedState { return true }
+        })
+
         check("Reconciliation evidence survives validated Codable replay", succeeds {
             var log=try CargoReconciliationLog()
             try log.append(CargoReconciliationEvent(compartmentID:compartment,cargo:cargo,calculatedUnitsBefore:100,confirmedPhysicalUnitsAfter:0,occurredAt:t0))
