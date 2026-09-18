@@ -12,7 +12,6 @@ public enum FuelMassProjectionError: Error, Equatable {
     case duplicateLoadEvidence(transactionID: CanonicalID)
     case invalidLoadEvidence(transactionID: CanonicalID)
     case insufficientMass(compartmentID: CanonicalID)
-    case reconciliationRequiresKnownDensity(compartmentID: CanonicalID)
 }
 
 public enum FuelMassProjector {
@@ -59,15 +58,6 @@ public enum FuelMassProjector {
                 d.litres += transaction.units; d.massKg += movedMass; working[destination] = d
             case .correction:
                 continue
-            case .reconcile:
-                guard let compartment = transaction.sourceCompartmentID else { continue }
-                if transaction.units <= 0.000001 {
-                    working[compartment] = WorkingState()
-                } else {
-                    let prior = working[compartment] ?? WorkingState()
-                    guard prior.litres > 0 else { throw FuelMassProjectionError.reconciliationRequiresKnownDensity(compartmentID: compartment) }
-                    working[compartment] = WorkingState(litres: transaction.units, massKg: transaction.units * (prior.massKg / prior.litres))
-                }
             }
         }
 
