@@ -25,6 +25,8 @@ public enum Chunk5EFieldGateTests {
             let store = try FieldTestStore.fiveCompartmentFixture()
             check("Field fixture has five compartments", store.compartmentIDs.count == 5)
             check("Field fixture exposes catalogue products", store.products.count == FuelCatalogue.supportedNames.count)
+            let idsBefore = store.compartmentIDs
+            check("Compartment fixture IDs are stable within snapshot", idsBefore == store.snapshot.compartmentIDs)
             check("Five compartments are fixture data, not a fixed DeliveryContext property",
                   Mirror(reflecting: tankWithDip).children.count == 2)
         } catch {
