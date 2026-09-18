@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 public struct FieldTestSnapshot: Codable, Sendable, Equatable {
     public var jobs: [ServiceJob]
