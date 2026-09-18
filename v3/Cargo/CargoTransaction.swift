@@ -5,11 +5,10 @@ public enum CargoTransactionKind: String, Codable, Sendable, CaseIterable {
     case unload
     case transfer
     case correction
-    case reconcile
 }
 
-/// Immutable cargo fact. Balances are projections of these transactions.
-/// Reconcile is not movement: it establishes an independently confirmed physical state.
+/// Immutable cargo movement/correction fact.
+/// Reconciliation is not a CargoTransaction: it establishes observed physical state.
 public struct CargoTransaction: Identifiable, Codable, Sendable, Equatable {
     public let id: CanonicalID
     public let kind: CargoTransactionKind
@@ -24,16 +23,9 @@ public struct CargoTransaction: Identifiable, Codable, Sendable, Equatable {
     public let note: String?
 
     public init(id: CanonicalID = .fresh(), kind: CargoTransactionKind, cargo: CargoKind, units: Double, sourceCompartmentID: CanonicalID? = nil, destinationCompartmentID: CanonicalID? = nil, occurredAt: Date, recordedAt: Date = Date(), provenance: EventProvenance = .driverEntered, correctsTransactionID: CanonicalID? = nil, note: String? = nil) {
-        self.id = id
-        self.kind = kind
-        self.cargo = cargo
-        self.units = units
-        self.sourceCompartmentID = sourceCompartmentID
-        self.destinationCompartmentID = destinationCompartmentID
-        self.occurredAt = occurredAt
-        self.recordedAt = recordedAt
-        self.provenance = provenance
-        self.correctsTransactionID = correctsTransactionID
-        self.note = note
+        self.id=id; self.kind=kind; self.cargo=cargo; self.units=units
+        self.sourceCompartmentID=sourceCompartmentID; self.destinationCompartmentID=destinationCompartmentID
+        self.occurredAt=occurredAt; self.recordedAt=recordedAt; self.provenance=provenance
+        self.correctsTransactionID=correctsTransactionID; self.note=note
     }
 }
