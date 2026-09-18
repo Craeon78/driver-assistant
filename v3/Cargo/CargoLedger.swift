@@ -60,7 +60,7 @@ public struct CargoLedger: Codable, Sendable, Equatable {
     }
 
     public mutating func append(_ transaction: CargoTransaction) throws {
-        guard transaction.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
+        if transaction.kind == .reconcile { guard transaction.units >= 0 else { throw CargoLedgerError.negativeReconciledQuantity } }\n        else { guard transaction.units > 0 else { throw CargoLedgerError.nonPositiveQuantity } }
         guard !transactions.contains(where: { $0.id == transaction.id }) else { throw CargoLedgerError.duplicateTransactionID }
         try validateShape(transaction)
         if transaction.kind == .correction { try validateCorrection(transaction) }
