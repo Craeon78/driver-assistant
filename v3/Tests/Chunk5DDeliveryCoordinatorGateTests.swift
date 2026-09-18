@@ -26,7 +26,7 @@ public enum Chunk5DDeliveryCoordinatorGateTests {
             card.recordDeliveredLitres(OperationalQuantityEvidence(value: 8001, unitName: "L", status: .confirmed, occurredAt: t0.addingTimeInterval(1020)))
 
             let commit = try FuelDeliveryCoordinator.prepare(job: job, card: card, product: product, compartmentAllocations: [(c1, 5000), (c3, 3001)], occurredAt: t0.addingTimeInterval(1020))
-            let outcome = try FuelDeliveryCoordinator.committing(commit, job: job, cargoLedger: ledger)
+            let outcome = try FuelDeliveryCoordinator.committing(commit, job: job, card: card, cargoLedger: ledger)
             return outcome.job.state == .completed
                 && (try outcome.cargoLedger.state(compartmentID: c1).quantity) == nil
                 && (try outcome.cargoLedger.state(compartmentID: c3).quantity) == nil
@@ -56,10 +56,29 @@ public enum Chunk5DDeliveryCoordinatorGateTests {
             card.recordDeliveredLitres(OperationalQuantityEvidence(value: 5580, unitName: "L", status: .confirmed, occurredAt: t0.addingTimeInterval(60)))
             let commit = try FuelDeliveryCoordinator.prepare(job: job, card: card, product: product, compartmentAllocations: [(c1, 5580)], occurredAt: t0.addingTimeInterval(60))
             do {
-                _ = try FuelDeliveryCoordinator.committing(commit, job: job, cargoLedger: ledger)
+                _ = try FuelDeliveryCoordinator.committing(commit, job: job, card: card, cargoLedger: ledger)
                 return false
             } catch FuelDeliveryCommitError.cargoCommitFailed {
                 return job.state == .active && (try ledger.state(compartmentID: c1).quantity?.units) == 5000
+            }
+        })
+
+        check("Forged commit cannot substitute product identity", succeeds {
+            var ledger = try CargoLedger(limits: [CargoCompartmentLimit(compartmentID: c1, capacityUnits: 8000)])
+            try ledger.append(CargoTransaction(kind: .load, cargo: product.cargoKind, units: 1000, destinationCompartmentID: c1, occurredAt: t0))
+            var job = ServiceJob(identity: ServiceJobIdentity())
+            guard job.confirmArrival(at: t0), job.begin(at: t0) else { return false }
+            var card = FuelDeliveryCard(serviceJobID: job.id, productID: product.id)
+            _ = card.startPump(at: t0); _ = card.finishPump(at: t0.addingTimeInterval(60))
+            card.recordDeliveredLitres(OperationalQuantityEvidence(value: 1000, unitName: "L", status: .confirmed, occurredAt: t0.addingTimeInterval(60)))
+            let other = FuelProduct(name: "Other Fuel", code: "other", family: .petrol)
+            let forgedTx = FuelCargoAdapter.delivery(product: other, litres: 1000, from: c1, occurredAt: t0.addingTimeInterval(60), destinationDescription: "serviceJob:\(job.id.raw.uuidString)")
+            let forged = FuelDeliveryCommit(serviceJobID: job.id, deliveryCardID: card.id, productID: other.id, cargoTransactions: [forgedTx], deliveredLitres: 1000, occurredAt: t0.addingTimeInterval(60))
+            do {
+                _ = try FuelDeliveryCoordinator.committing(forged, job: job, card: card, cargoLedger: ledger)
+                return false
+            } catch FuelDeliveryCommitError.productMismatch {
+                return job.state == .active
             }
         })
 
