@@ -81,18 +81,49 @@ public struct CargoVarianceLedger: Codable, Sendable, Equatable {
         if a.recordedAt != b.recordedAt { return a.recordedAt < b.recordedAt }
         return a.id.raw.uuidString < b.id.raw.uuidString
     }
-}/// Reconciliation establishes physical truth without pretending cargo moved.
-/// The reconcile transaction remains in append-only Cargo history, while the signed
-/// discrepancy is independently conserved in the Variance Ledger.
+}\n
+public struct CargoReconciliation: Codable, Sendable, Equatable {
+    public let id: CanonicalID
+    public let compartmentID: CanonicalID
+    public let cargo: CargoKind
+    public let calculatedUnits: Double
+    public let confirmedPhysicalUnits: Double
+    public let occurredAt: Date
+    public let provenance: EventProvenance
+    public let relatedOperationID: CanonicalID?
+
+    public init(id: CanonicalID = .fresh(), compartmentID: CanonicalID, cargo: CargoKind, calculatedUnits: Double, confirmedPhysicalUnits: Double, occurredAt: Date, provenance: EventProvenance = .driverEntered, relatedOperationID: CanonicalID? = nil) {
+        self.id = id
+        self.compartmentID = compartmentID
+        self.cargo = cargo
+        self.calculatedUnits = calculatedUnits
+        self.confirmedPhysicalUnits = confirmedPhysicalUnits
+        self.occurredAt = occurredAt
+        self.provenance = provenance
+        self.relatedOperationID = relatedOperationID
+    }
+}
+
+public enum CargoReconciliationError: Error, Equatable {
+    case unknownCompartment
+    case cargoMismatch
+    case staleCalculatedState
+    case negativePhysicalState
+    case noVariance
+}
+
+/// Reconciliation establishes physical truth without pretending cargo moved.
 public enum CargoReconciler {
     public static func reconcile(_ request: CargoReconciliation, cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger) throws -> (cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger, variance: CargoVarianceEntry) {
         guard request.confirmedPhysicalUnits >= 0 else { throw CargoReconciliationError.negativePhysicalState }
         let state: CargoCompartmentState
         do { state = try cargoLedger.state(compartmentID: request.compartmentID) }
         catch { throw CargoReconciliationError.unknownCompartment }
+
         let current = state.quantity?.units ?? 0
         if let currentCargo = state.quantity?.cargo, currentCargo.id != request.cargo.id { throw CargoReconciliationError.cargoMismatch }
         guard abs(current - request.calculatedUnits) < 0.000001 else { throw CargoReconciliationError.staleCalculatedState }
+
         let delta = request.confirmedPhysicalUnits - request.calculatedUnits
         guard abs(delta) > 0.000001 else { throw CargoReconciliationError.noVariance }
 
