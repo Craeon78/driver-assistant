@@ -1,140 +1,93 @@
 import Foundation
 
-/// A signed accounting discrepancy between projected Cargo state and observed physical truth.
-/// Positive means more physical cargo was observed/moved than the projection explained.
-/// Negative means less physical cargo was observed than the projection expected.
-///
-/// Variance is evidence only. It is never deliverable inventory and is never replayed into
-/// CargoLedger compartment balances.
-public struct CargoVarianceEntry: Identifiable, Codable, Sendable, Equatable {
+/// A reconciliation is a physical-state boundary, not cargo movement.
+/// It preserves what arithmetic said, what physical evidence established, and the discrepancy.
+/// The discrepancy is accounting evidence only and is never deliverable inventory.
+public struct CargoReconciliationEvent: Identifiable, Codable, Sendable, Equatable {
     public let id: CanonicalID
+    public let compartmentID: CanonicalID
     public let cargo: CargoKind
-    public let quantityDelta: Double
+    public let calculatedUnitsBefore: Double
+    public let confirmedPhysicalUnitsAfter: Double
+    /// Optional independently observed movement discrepancy.
+    /// Example: calculated 5,501 L available, meter proves 5,580 L delivered, confirmed empty => +79 L.
+    public let observedMovementVariance: Double?
     public let occurredAt: Date
     public let recordedAt: Date
     public let provenance: EventProvenance
     public let relatedCargoTransactionID: CanonicalID?
     public let relatedOperationID: CanonicalID?
-    public let resultingKnownUnits: Double
     public let note: String?
 
-    public init(
-        id: CanonicalID = .fresh(),
-        cargo: CargoKind,
-        quantityDelta: Double,
-        occurredAt: Date,
-        recordedAt: Date = Date(),
-        provenance: EventProvenance = .driverEntered,
-        relatedCargoTransactionID: CanonicalID? = nil,
-        relatedOperationID: CanonicalID? = nil,
-        resultingKnownUnits: Double,
-        note: String? = nil
-    ) {
-        self.id = id
-        self.cargo = cargo
-        self.quantityDelta = quantityDelta
-        self.occurredAt = occurredAt
-        self.recordedAt = recordedAt
-        self.provenance = provenance
-        self.relatedCargoTransactionID = relatedCargoTransactionID
-        self.relatedOperationID = relatedOperationID
-        self.resultingKnownUnits = resultingKnownUnits
-        self.note = note
-    }
-}
-
-public enum CargoVarianceLedgerError: Error, Equatable {
-    case zeroVariance
-    case negativeResultingPhysicalState
-    case duplicateEntryID
-}
-
-/// Append-only accounting of discrepancies. Deliberately separate from CargoLedger:
-/// this ledger can explain and later analyse variance, but cannot be dipped into for a delivery.
-public struct CargoVarianceLedger: Codable, Sendable, Equatable {
-    public private(set) var entries: [CargoVarianceEntry]
-
-    public init(entries: [CargoVarianceEntry] = []) throws {
-        self.entries = []
-        for entry in entries.sorted(by: Self.order) {
-            try append(entry)
-        }
+    public init(id: CanonicalID = .fresh(), compartmentID: CanonicalID, cargo: CargoKind, calculatedUnitsBefore: Double, confirmedPhysicalUnitsAfter: Double, observedMovementVariance: Double? = nil, occurredAt: Date, recordedAt: Date = Date(), provenance: EventProvenance = .driverEntered, relatedCargoTransactionID: CanonicalID? = nil, relatedOperationID: CanonicalID? = nil, note: String? = nil) {
+        self.id=id; self.compartmentID=compartmentID; self.cargo=cargo
+        self.calculatedUnitsBefore=calculatedUnitsBefore; self.confirmedPhysicalUnitsAfter=confirmedPhysicalUnitsAfter
+        self.observedMovementVariance=observedMovementVariance; self.occurredAt=occurredAt; self.recordedAt=recordedAt
+        self.provenance=provenance; self.relatedCargoTransactionID=relatedCargoTransactionID
+        self.relatedOperationID=relatedOperationID; self.note=note
     }
 
-    public init(from decoder: Decoder) throws {\n        let container = try decoder.container(keyedBy: CodingKeys.self)\n        let decoded = try container.decode([CargoVarianceEntry].self, forKey: .entries)\n        do { self = try CargoVarianceLedger(entries: decoded) }\n        catch { throw DecodingError.dataCorruptedError(forKey: .entries, in: container, debugDescription: "Cargo variance ledger failed validated replay: \\(error)") }\n    }\n\n    public func encode(to encoder: Encoder) throws {\n        var container = encoder.container(keyedBy: CodingKeys.self)\n        try container.encode(entries, forKey: .entries)\n    }\n\n    public mutating func append(_ entry: CargoVarianceEntry) throws {
-        guard abs(entry.quantityDelta) > 0.000001 else { throw CargoVarianceLedgerError.zeroVariance }
-        guard entry.resultingKnownUnits >= -0.000001 else { throw CargoVarianceLedgerError.negativeResultingPhysicalState }
-        guard !entries.contains(where: { $0.id == entry.id }) else { throw CargoVarianceLedgerError.duplicateEntryID }
-        entries.append(entry)
-        entries.sort(by: Self.order)
-    }
-
-    /// Accounting total only. This value must never be interpreted as available Cargo.
-    public func netVariance(cargoID: CanonicalID? = nil) -> Double {
-        entries
-            .filter { cargoID == nil || $0.cargo.id == cargoID }
-            .reduce(0) { $0 + $1.quantityDelta }
-    }
-
-    private static func order(_ a: CargoVarianceEntry, _ b: CargoVarianceEntry) -> Bool {
-        if a.occurredAt != b.occurredAt { return a.occurredAt < b.occurredAt }
-        if a.recordedAt != b.recordedAt { return a.recordedAt < b.recordedAt }
-        return a.id.raw.uuidString < b.id.raw.uuidString
-    }
-}
-
-public struct CargoReconciliation: Codable, Sendable, Equatable {
-    public let id: CanonicalID
-    public let compartmentID: CanonicalID
-    public let cargo: CargoKind
-    public let calculatedUnits: Double
-    public let confirmedPhysicalUnits: Double
-    public let occurredAt: Date
-    public let provenance: EventProvenance
-    public let relatedOperationID: CanonicalID?
-
-    public init(id: CanonicalID = .fresh(), compartmentID: CanonicalID, cargo: CargoKind, calculatedUnits: Double, confirmedPhysicalUnits: Double, occurredAt: Date, provenance: EventProvenance = .driverEntered, relatedOperationID: CanonicalID? = nil) {
-        self.id = id
-        self.compartmentID = compartmentID
-        self.cargo = cargo
-        self.calculatedUnits = calculatedUnits
-        self.confirmedPhysicalUnits = confirmedPhysicalUnits
-        self.occurredAt = occurredAt
-        self.provenance = provenance
-        self.relatedOperationID = relatedOperationID
+    public var quantityDelta: Double {
+        observedMovementVariance ?? (confirmedPhysicalUnitsAfter - calculatedUnitsBefore)
     }
 }
 
 public enum CargoReconciliationError: Error, Equatable {
-    case unknownCompartment
-    case cargoMismatch
-    case staleCalculatedState
-    case negativePhysicalState
-    case noVariance\n    case backdatedBoundary
+    case negativeCalculatedState, negativePhysicalState, noVariance, duplicateEventID
 }
 
-/// Reconciliation establishes physical truth without pretending cargo moved.
-public enum CargoReconciler {
-    public static func reconcile(_ request: CargoReconciliation, cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger) throws -> (cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger, variance: CargoVarianceEntry) {
-        guard request.confirmedPhysicalUnits >= 0 else { throw CargoReconciliationError.negativePhysicalState }\n        if let latest = cargoLedger.transactions.max(by: {\n            if $0.occurredAt != $1.occurredAt { return $0.occurredAt < $1.occurredAt }\n            if $0.recordedAt != $1.recordedAt { return $0.recordedAt < $1.recordedAt }\n            return $0.id.raw.uuidString < $1.id.raw.uuidString\n        }), request.occurredAt < latest.occurredAt { throw CargoReconciliationError.backdatedBoundary }
-        let state: CargoCompartmentState
-        do { state = try cargoLedger.state(compartmentID: request.compartmentID) }
-        catch { throw CargoReconciliationError.unknownCompartment }
+/// Append-only reconciliation evidence. "Variance ledger" is a projection of these events,
+/// not a second inventory ledger.
+public struct CargoReconciliationLog: Codable, Sendable, Equatable {
+    public private(set) var events: [CargoReconciliationEvent]
+    private enum CodingKeys: String, CodingKey { case events }
 
-        let current = state.quantity?.units ?? 0
-        if let currentCargo = state.quantity?.cargo, currentCargo.id != request.cargo.id { throw CargoReconciliationError.cargoMismatch }
-        guard abs(current - request.calculatedUnits) < 0.000001 else { throw CargoReconciliationError.staleCalculatedState }
+    public init(events: [CargoReconciliationEvent] = []) throws {
+        self.events=[]
+        for e in events.sorted(by:Self.order) { try append(e) }
+    }
+    public init(from decoder: Decoder) throws {
+        let c=try decoder.container(keyedBy:CodingKeys.self)
+        do { self=try CargoReconciliationLog(events:c.decode([CargoReconciliationEvent].self,forKey:.events)) }
+        catch { throw DecodingError.dataCorruptedError(forKey:.events,in:c,debugDescription:"Cargo reconciliation log failed validated replay: \(error)") }
+    }
+    public func encode(to encoder: Encoder) throws { var c=encoder.container(keyedBy:CodingKeys.self); try c.encode(events,forKey:.events) }
+    public mutating func append(_ e: CargoReconciliationEvent) throws {
+        guard e.calculatedUnitsBefore >= 0 else { throw CargoReconciliationError.negativeCalculatedState }
+        guard e.confirmedPhysicalUnitsAfter >= 0 else { throw CargoReconciliationError.negativePhysicalState }
+        guard abs(e.quantityDelta) > 0.000001 else { throw CargoReconciliationError.noVariance }
+        guard !events.contains(where:{$0.id==e.id}) else { throw CargoReconciliationError.duplicateEventID }
+        events.append(e); events.sort(by:Self.order)
+    }
+    /// Query/projection only. Never feed this value into Cargo availability.
+    public func netVariance(cargoID: CanonicalID? = nil) -> Double {
+        events.filter{cargoID==nil || $0.cargo.id==cargoID}.reduce(0){$0+$1.quantityDelta}
+    }
+    private static func order(_ a:CargoReconciliationEvent,_ b:CargoReconciliationEvent)->Bool { if a.occurredAt != b.occurredAt{return a.occurredAt<b.occurredAt}; if a.recordedAt != b.recordedAt{return a.recordedAt<b.recordedAt}; return a.id.raw.uuidString<b.id.raw.uuidString }
+}
 
-        let delta = request.confirmedPhysicalUnits - request.calculatedUnits
-        guard abs(delta) > 0.000001 else { throw CargoReconciliationError.noVariance }
+/// Current physical Cargo is a projection of movement truth plus reconciliation boundaries.
+/// The CargoLedger itself remains movement-only and immutable.
+public struct ReconciledCargoState: Codable, Sendable, Equatable {
+    public let compartmentID: CanonicalID
+    public let quantity: CargoQuantity?
+}
 
-        var candidateCargo = cargoLedger
-        let boundary = CargoTransaction(id: request.id, kind: .reconcile, cargo: request.cargo, units: request.confirmedPhysicalUnits, sourceCompartmentID: request.compartmentID, occurredAt: request.occurredAt, provenance: request.provenance, note: "confirmed physical reconciliation boundary")
-        try candidateCargo.append(boundary)
+public enum CargoStateReconciler {
+    public static func currentState(ledger: CargoLedger, reconciliationLog: CargoReconciliationLog, compartmentID: CanonicalID) throws -> ReconciledCargoState {
+        let base = try ledger.state(compartmentID: compartmentID)
+        guard let boundary = reconciliationLog.events.filter({$0.compartmentID==compartmentID}).max(by: {
+            if $0.occurredAt != $1.occurredAt { return $0.occurredAt < $1.occurredAt }
+            if $0.recordedAt != $1.recordedAt { return $0.recordedAt < $1.recordedAt }
+            return $0.id.raw.uuidString < $1.id.raw.uuidString
+        }) else { return ReconciledCargoState(compartmentID:compartmentID,quantity:base.quantity) }
 
-        var candidateVariance = varianceLedger
-        let entry = CargoVarianceEntry(cargo: request.cargo, quantityDelta: delta, occurredAt: request.occurredAt, provenance: request.provenance, relatedCargoTransactionID: boundary.id, relatedOperationID: request.relatedOperationID, resultingKnownUnits: request.confirmedPhysicalUnits)
-        try candidateVariance.append(entry)
-        return (candidateCargo, candidateVariance, entry)
+        // 5D permits a boundary only at the current edge. Later movement replay across historical
+        // boundaries belongs in the unified EventLog work; do not silently invent ordering here.
+        if let later = ledger.transactions.filter({$0.sourceCompartmentID==compartmentID || $0.destinationCompartmentID==compartmentID}).max(by: {$0.occurredAt<$1.occurredAt}), later.occurredAt > boundary.occurredAt {
+            return ReconciledCargoState(compartmentID:compartmentID,quantity:base.quantity)
+        }
+        let q = boundary.confirmedPhysicalUnitsAfter <= 0.000001 ? nil : CargoQuantity(cargo:boundary.cargo,units:boundary.confirmedPhysicalUnitsAfter)
+        return ReconciledCargoState(compartmentID:compartmentID,quantity:q)
     }
 }
