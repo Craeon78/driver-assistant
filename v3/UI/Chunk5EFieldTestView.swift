@@ -106,6 +106,8 @@ private struct DeliveryFieldView: View {
     @State private var opening = ""
     @State private var closing = ""
     @State private var allocation = ["", "", "", "", ""]
+    @State private var reconcilePhysical = ["", "", "", "", ""]
+    @State private var movementVariance = ["", "", "", "", ""]
     @State private var message = ""
 
     private var job: ServiceJob? { store.snapshot.jobs.first { $0.id == jobID } }
@@ -171,6 +173,25 @@ private struct DeliveryFieldView: View {
                                 message = "Delivery committed."
                             } catch {
                                 message = "Not committed: \(error)"
+                            }
+                        }
+                    }
+                }
+
+                Section("Physical reconciliation") {
+                    Text("Use only when physical observation disproves calculated Cargo. Variance is evidence; this does not move fuel.").font(.caption)
+                    ForEach(0..<min(5, store.compartmentIDs.count), id: \.self) { index in
+                        VStack(alignment: .leading) {
+                            Text("C\(index + 1)")
+                            TextField("Confirmed physical litres", text: $reconcilePhysical[index]).keyboardType(.decimalPad)
+                            TextField("Observed movement variance (optional)", text: $movementVariance[index]).keyboardType(.numbersAndPunctuation)
+                            Button("Record reconciliation") {
+                                guard let physical = Double(reconcilePhysical[index]), physical >= 0 else { return }
+                                do {
+                                    try store.reconcile(compartmentID: store.compartmentIDs[index], confirmedPhysicalLitres: physical, observedMovementVariance: Double(movementVariance[index]), note: "5E driver-confirmed physical reconciliation")
+                                    message = "Reconciliation evidence recorded."
+                                    reconcilePhysical[index] = ""; movementVariance[index] = ""
+                                } catch { message = "Reconciliation not recorded: \(error)" }
                             }
                         }
                     }
