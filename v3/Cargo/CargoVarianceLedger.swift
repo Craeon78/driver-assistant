@@ -61,7 +61,7 @@ public struct CargoVarianceLedger: Codable, Sendable, Equatable {
         }
     }
 
-    public mutating func append(_ entry: CargoVarianceEntry) throws {
+    public init(from decoder: Decoder) throws {\n        let container = try decoder.container(keyedBy: CodingKeys.self)\n        let decoded = try container.decode([CargoVarianceEntry].self, forKey: .entries)\n        do { self = try CargoVarianceLedger(entries: decoded) }\n        catch { throw DecodingError.dataCorruptedError(forKey: .entries, in: container, debugDescription: "Cargo variance ledger failed validated replay: \\(error)") }\n    }\n\n    public func encode(to encoder: Encoder) throws {\n        var container = encoder.container(keyedBy: CodingKeys.self)\n        try container.encode(entries, forKey: .entries)\n    }\n\n    public mutating func append(_ entry: CargoVarianceEntry) throws {
         guard abs(entry.quantityDelta) > 0.000001 else { throw CargoVarianceLedgerError.zeroVariance }
         guard entry.resultingKnownUnits >= -0.000001 else { throw CargoVarianceLedgerError.negativeResultingPhysicalState }
         guard !entries.contains(where: { $0.id == entry.id }) else { throw CargoVarianceLedgerError.duplicateEntryID }
@@ -110,13 +110,13 @@ public enum CargoReconciliationError: Error, Equatable {
     case cargoMismatch
     case staleCalculatedState
     case negativePhysicalState
-    case noVariance
+    case noVariance\n    case backdatedBoundary
 }
 
 /// Reconciliation establishes physical truth without pretending cargo moved.
 public enum CargoReconciler {
     public static func reconcile(_ request: CargoReconciliation, cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger) throws -> (cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger, variance: CargoVarianceEntry) {
-        guard request.confirmedPhysicalUnits >= 0 else { throw CargoReconciliationError.negativePhysicalState }
+        guard request.confirmedPhysicalUnits >= 0 else { throw CargoReconciliationError.negativePhysicalState }\n        if let latest = cargoLedger.transactions.max(by: {\n            if $0.occurredAt != $1.occurredAt { return $0.occurredAt < $1.occurredAt }\n            if $0.recordedAt != $1.recordedAt { return $0.recordedAt < $1.recordedAt }\n            return $0.id.raw.uuidString < $1.id.raw.uuidString\n        }), request.occurredAt < latest.occurredAt { throw CargoReconciliationError.backdatedBoundary }
         let state: CargoCompartmentState
         do { state = try cargoLedger.state(compartmentID: request.compartmentID) }
         catch { throw CargoReconciliationError.unknownCompartment }
