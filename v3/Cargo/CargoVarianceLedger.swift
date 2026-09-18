@@ -81,4 +81,28 @@ public struct CargoVarianceLedger: Codable, Sendable, Equatable {
         if a.recordedAt != b.recordedAt { return a.recordedAt < b.recordedAt }
         return a.id.raw.uuidString < b.id.raw.uuidString
     }
+}/// Reconciliation establishes physical truth without pretending cargo moved.
+/// The reconcile transaction remains in append-only Cargo history, while the signed
+/// discrepancy is independently conserved in the Variance Ledger.
+public enum CargoReconciler {
+    public static func reconcile(_ request: CargoReconciliation, cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger) throws -> (cargoLedger: CargoLedger, varianceLedger: CargoVarianceLedger, variance: CargoVarianceEntry) {
+        guard request.confirmedPhysicalUnits >= 0 else { throw CargoReconciliationError.negativePhysicalState }
+        let state: CargoCompartmentState
+        do { state = try cargoLedger.state(compartmentID: request.compartmentID) }
+        catch { throw CargoReconciliationError.unknownCompartment }
+        let current = state.quantity?.units ?? 0
+        if let currentCargo = state.quantity?.cargo, currentCargo.id != request.cargo.id { throw CargoReconciliationError.cargoMismatch }
+        guard abs(current - request.calculatedUnits) < 0.000001 else { throw CargoReconciliationError.staleCalculatedState }
+        let delta = request.confirmedPhysicalUnits - request.calculatedUnits
+        guard abs(delta) > 0.000001 else { throw CargoReconciliationError.noVariance }
+
+        var candidateCargo = cargoLedger
+        let boundary = CargoTransaction(id: request.id, kind: .reconcile, cargo: request.cargo, units: request.confirmedPhysicalUnits, sourceCompartmentID: request.compartmentID, occurredAt: request.occurredAt, provenance: request.provenance, note: "confirmed physical reconciliation boundary")
+        try candidateCargo.append(boundary)
+
+        var candidateVariance = varianceLedger
+        let entry = CargoVarianceEntry(cargo: request.cargo, quantityDelta: delta, occurredAt: request.occurredAt, provenance: request.provenance, relatedCargoTransactionID: boundary.id, relatedOperationID: request.relatedOperationID, resultingKnownUnits: request.confirmedPhysicalUnits)
+        try candidateVariance.append(entry)
+        return (candidateCargo, candidateVariance, entry)
+    }
 }
