@@ -20,6 +20,8 @@ private struct TodayFieldView: View {
     @State private var expected = "5000"
     @State private var destination: DeliveryDestinationKind = .storageTank
     @State private var dipAvailable = true
+    @State private var selectedProductIndex = 0
+    @State private var startingCargo = ["", "", "", "", ""]
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,22 @@ private struct TodayFieldView: View {
                     }
                 }
 
+                Section("Starting cargo") {
+                    Picker("Product", selection: $selectedProductIndex) {
+                        ForEach(Array(store.products.enumerated()), id: \.offset) { index, product in Text(product.name).tag(index) }
+                    }
+                    ForEach(0..<min(5, store.compartmentIDs.count), id: \.self) { index in
+                        HStack {
+                            TextField("C\(index + 1) litres", text: $startingCargo[index]).keyboardType(.decimalPad)
+                            Button("Load") {
+                                guard store.products.indices.contains(selectedProductIndex), let litres = Double(startingCargo[index]), litres > 0 else { return }
+                                try? store.establishStartingCargo(product: store.products[selectedProductIndex], litres: litres, compartmentID: store.compartmentIDs[index])
+                                startingCargo[index] = ""
+                            }
+                        }
+                    }
+                }
+
                 Section("New delivery") {
                     TextField("Expected litres", text: $expected).keyboardType(.decimalPad)
                     Picker("Destination", selection: $destination) {
@@ -50,7 +68,8 @@ private struct TodayFieldView: View {
                         Toggle("Usable dipstick", isOn: $dipAvailable)
                     }
                     Button("Add delivery") {
-                        guard let product = store.products.first else { return }
+                        guard store.products.indices.contains(selectedProductIndex) else { return }
+                        let product = store.products[selectedProductIndex]
                         let method: LevelObservationMethod? =
                             destination == .storageTank && dipAvailable ? .dipstick : nil
                         store.addJob(
