@@ -2,6 +2,7 @@ import Foundation
 
 public enum CargoLedgerError: Error, Equatable {
     case nonPositiveQuantity
+    case negativeReconciledQuantity
     case unknownSourceCompartment
     case unknownDestinationCompartment
     case invalidEndpoints
@@ -23,33 +24,22 @@ public struct CargoLedger: Codable, Sendable, Equatable {
     public init(limits: [CargoCompartmentLimit], transactions: [CargoTransaction] = []) throws {
         var seenCompartments = Set<CanonicalID>()
         for limit in limits {
-            guard seenCompartments.insert(limit.compartmentID).inserted else {
-                throw CargoLedgerError.duplicateCompartmentLimit
-            }
+            guard seenCompartments.insert(limit.compartmentID).inserted else { throw CargoLedgerError.duplicateCompartmentLimit }
         }
         self.limits = limits
         self.transactions = []
-        for transaction in transactions.sorted(by: Self.order) {
-            try append(transaction)
-        }
+        for transaction in transactions.sorted(by: Self.order) { try append(transaction) }
     }
 
     private enum CodingKeys: String, CodingKey { case limits, transactions }
 
-    /// Persistence is not a privileged path. Decoded history is rebuilt through
-    /// the same invariant checks as live appends before becoming usable truth.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedLimits = try container.decode([CargoCompartmentLimit].self, forKey: .limits)
         let decodedTransactions = try container.decode([CargoTransaction].self, forKey: .transactions)
-        do {
-            self = try CargoLedger(limits: decodedLimits, transactions: decodedTransactions)
-        } catch {
-            throw DecodingError.dataCorruptedError(
-                forKey: .transactions,
-                in: container,
-                debugDescription: "Cargo ledger failed validated replay: \(error)"
-            )
+        do { self = try CargoLedger(limits: decodedLimits, transactions: decodedTransactions) }
+        catch {
+            throw DecodingError.dataCorruptedError(forKey: .transactions, in: container, debugDescription: "Cargo ledger failed validated replay: \(error)")
         }
     }
 
@@ -60,7 +50,11 @@ public struct CargoLedger: Codable, Sendable, Equatable {
     }
 
     public mutating func append(_ transaction: CargoTransaction) throws {
-        if transaction.kind == .reconcile { guard transaction.units >= 0 else { throw CargoLedgerError.negativeReconciledQuantity } }\n        else { guard transaction.units > 0 else { throw CargoLedgerError.nonPositiveQuantity } }
+        if transaction.kind == .reconcile {
+            guard transaction.units >= 0 else { throw CargoLedgerError.negativeReconciledQuantity }
+        } else {
+            guard transaction.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
+        }
         guard !transactions.contains(where: { $0.id == transaction.id }) else { throw CargoLedgerError.duplicateTransactionID }
         try validateShape(transaction)
         if transaction.kind == .correction { try validateCorrection(transaction) }
@@ -100,19 +94,15 @@ public struct CargoLedger: Codable, Sendable, Equatable {
             guard t.sourceCompartmentID != t.destinationCompartmentID else { throw CargoLedgerError.sameTransferCompartment }
         case .correction:
             guard t.correctsTransactionID != nil else { throw CargoLedgerError.correctionTargetMissing }
+        case .reconcile:
+            guard known(t.sourceCompartmentID), t.destinationCompartmentID == nil, t.correctsTransactionID == nil else { throw CargoLedgerError.invalidEndpoints }
         }
     }
 
     private func validateCorrection(_ t: CargoTransaction) throws {
-        guard let targetID = t.correctsTransactionID,
-              let target = transactions.first(where: { $0.id == targetID }) else { throw CargoLedgerError.correctionTargetMissing }
+        guard let targetID = t.correctsTransactionID, let target = transactions.first(where: { $0.id == targetID }) else { throw CargoLedgerError.correctionTargetMissing }
         guard !transactions.contains(where: { $0.correctsTransactionID == targetID }) else { throw CargoLedgerError.correctionTargetAlreadyCorrected }
-        // A correction is an exact persisted inverse of the target; descriptor,
-        // units and endpoints must all match so mass/unit semantics cannot drift.
-        guard t.cargo == target.cargo,
-              t.units == target.units,
-              t.sourceCompartmentID == target.destinationCompartmentID,
-              t.destinationCompartmentID == target.sourceCompartmentID else { throw CargoLedgerError.invalidEndpoints }
+        guard t.cargo == target.cargo, t.units == target.units, t.sourceCompartmentID == target.destinationCompartmentID, t.destinationCompartmentID == target.sourceCompartmentID else { throw CargoLedgerError.invalidEndpoints }
     }
 
     private static func order(_ a: CargoTransaction, _ b: CargoTransaction) -> Bool {
@@ -132,9 +122,9 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         func remove(_ units: Double, cargo: CargoKind, from id: CanonicalID) throws {
             guard let current = state[id], current.cargo == cargo, current.units + 0.000001 >= units else { throw CargoLedgerError.insufficientQuantity }
             let remaining = current.units - units
-            if remaining <= 0.000001 { state[id] = nil }
-            else { state[id] = CargoQuantity(cargo: current.cargo, units: remaining) }
+            state[id] = remaining <= 0.000001 ? nil : CargoQuantity(cargo: current.cargo, units: remaining)
         }
+
         func add(_ units: Double, cargo: CargoKind, to id: CanonicalID) throws {
             guard let cap = capacity[id] else { throw CargoLedgerError.unknownDestinationCompartment }
             if let current = state[id], current.cargo != cargo { throw CargoLedgerError.mixedCargo }
@@ -158,6 +148,14 @@ public struct CargoLedger: Codable, Sendable, Equatable {
             case .correction:
                 if let source = t.sourceCompartmentID { try remove(t.units, cargo: t.cargo, from: source) }
                 if let destination = t.destinationCompartmentID { try add(t.units, cargo: t.cargo, to: destination) }
+            case .reconcile:
+                guard let compartment = t.sourceCompartmentID, let cap = capacity[compartment] else { throw CargoLedgerError.invalidEndpoints }
+                guard t.units <= cap + 0.000001 else { throw CargoLedgerError.capacityExceeded }
+                if t.units <= 0.000001 {
+                    state[compartment] = nil
+                } else {
+                    state[compartment] = CargoQuantity(cargo: t.cargo, units: t.units)
+                }
             }
         }
         return state
