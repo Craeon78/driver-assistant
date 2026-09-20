@@ -61,23 +61,37 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var preShift: some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel("DRIVER / TRUCK") {
-                Text("DRIVER: MACOZZA").font(.title3.bold())
-                Text("Truck 92 • selected")
-                Divider()
-                Text("Running tank: Full")
-                Text("AdBlue: Full")
-                Text("Planned cargo: 2,000 ULP • 38,500 DIE")
-                Button("START SHIFT") { store.startShift() }.buttonStyle(.borderedProminent)
+        VStack(spacing: 16) {
+            // Large central primary action — Slice A.1
+            Button {
+                store.startShift()
+            } label: {
+                Text("START SHIFT")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
             }
-            panel("TODAY") {
-                Text("No current attention items")
-                Spacer()
-                Text("This month").font(.caption).foregroundStyle(.secondary)
-                Text("Litres delivered  •  km driven")
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.green)
+
+            HStack(alignment: .top, spacing: 14) {
+                panel("DRIVER / TRUCK") {
+                    Text("DRIVER: MACOZZA").font(.title3.bold())
+                    Text("Truck 92 • selected")
+                    Divider()
+                    Text("Running tank: Full")
+                    Text("AdBlue: Full")
+                    Text("Planned cargo: 2,000 ULP • 38,500 XLS")  // DIE → XLS (Slice A.6 preview)
+                }
+                panel("TODAY") {
+                    Text("No current attention items")
+                    Spacer()
+                    Text("This month").font(.caption).foregroundStyle(.secondary)
+                    Text("Litres delivered  •  km driven")
+                }
+                Chunk5FRunView(store: store).frame(maxWidth: .infinity)
             }
-            Chunk5FRunView(store: store).frame(maxWidth: .infinity)
         }
     }
 
