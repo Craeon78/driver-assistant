@@ -22,7 +22,9 @@ public struct Chunk5FRunView: View {
             List {
                 ForEach(Array(store.visits.enumerated()), id: \.element.id) { index, visit in
                     Button {
-                        if store.workspace != .rest { store.openSite(index) }
+                        if store.workspace != .rest && store.canOpenOperationalWorkspace && !visit.isComplete {
+                            store.openSite(index)
+                        }
                     } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
@@ -42,6 +44,7 @@ public struct Chunk5FRunView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
+                    .disabled(store.workspace == .rest || !store.canOpenOperationalWorkspace || visit.isComplete)
                 }
                 .onMove { source, destination in
                     store.moveVisit(from: source, to: destination)
