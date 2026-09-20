@@ -39,9 +39,11 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.commitLoad()
         check("Load Confirm appends through CargoLedger", store.cargoLedger.transactions.count > transactionCountBeforeLoadConfirm)
         check("Load Confirm derives new confirmed quantity", store.confirmedLitres[0] == beforeLoad + 1000)
+        let afterLoad = store.confirmedLitres[0]
         store.openLoad()
+        store.setDraft(compartment: 0, litres: afterLoad + 200)
         store.undoDraft()
-        check("Undo restores load draft", store.draftLitres[0] == beforeLoad)
+        check("Undo restores load draft", store.draftLitres[0] == afterLoad)
 
         store.workspace = .active
         store.beginRest()
