@@ -119,6 +119,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         return visits[selectedVisit]
     }
 
+    public var nextIncompleteVisitIndex: Int? {
+        visits.indices.first(where: { !visits[$0].isComplete })
+    }
+
+    public var nextIncompleteVisit: Chunk5FSiteVisit? {
+        guard let index = nextIncompleteVisitIndex else { return nil }
+        return visits[index]
+    }
+
     public var currentFill: Chunk5FFillItem? {
         guard let visit = currentVisit, visit.fills.indices.contains(selectedFill) else { return nil }
         return visit.fills[selectedFill]
@@ -133,12 +142,25 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public var deliveryMovement: Int {
-        zip(confirmedLitres, draftLitres).reduce(0) { total, pair in
-            total + max(0, pair.0 - pair.1)
+        guard let fill = currentFill else { return 0 }
+        return compartments.indices.reduce(0) { total, index in
+            guard compartments[index].product == fill.product else { return total }
+            return total + max(0, confirmedLitres[index] - draftLitres[index])
         }
     }
 
     public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
+    public var canOpenOperationalWorkspace: Bool { prototypeSpeedKmh <= 5 }
+
+    public var deliveryDraftIsValid: Bool {
+        guard let fill = currentFill else { return false }
+        let before = confirmedLitres
+        for index in compartments.indices {
+            if compartments[index].product != fill.product && draftLitres[index] != before[index] { return false }
+            if draftLitres[index] > before[index] { return false }
+        }
+        return deliveryMovement > 0
+    }
 
     public var plannedDelivery: Int { currentFill?.plannedLitres ?? 0 }
     public var deliveryDifference: Int { deliveryMovement - plannedDelivery }
@@ -162,12 +184,31 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         message = moving ? "Prototype moving state — run is view-only." : "Prototype stationary state — run can be reordered."
     }
 
-    public func openSite(_ index: Int) {
-        guard visits.indices.contains(index) else { return }
+    @discardableResult
+    public func openSite(_ index: Int) -> Bool {
+        guard canOpenOperationalWorkspace else {
+            message = "Site workspace unavailable while moving."
+            return false
+        }
+        guard visits.indices.contains(index) else { return false }
+        guard let nextFill = visits[index].fills.firstIndex(where: { !$0.completed }) else {
+            message = "\(visits[index].customer) — \(visits[index].site) is complete. Review/history is a later path."
+            return false
+        }
         selectedVisit = index
-        selectedFill = visits[index].fills.firstIndex(where: { !$0.completed }) ?? 0
+        selectedFill = nextFill
         resetDraft()
         workspace = .site
+        return true
+    }
+
+    @discardableResult
+    public func openNextIncompleteSite() -> Bool {
+        guard let index = nextIncompleteVisitIndex else {
+            message = "No incomplete site visits."
+            return false
+        }
+        return openSite(index)
     }
 
     public func beginRest() {
@@ -180,6 +221,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func openLoad() {
+        guard canOpenOperationalWorkspace else {
+            message = "Load workspace unavailable while moving."
+            return
+        }
         resetDraft()
         workspace = .load
     }
@@ -197,11 +242,29 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func setDraft(compartment index: Int, litres: Int) {
         guard draftLitres.indices.contains(index), compartments.indices.contains(index) else { return }
-        draftLitres[index] = min(max(0, litres), compartments[index].capacityLitres)
+        let clamped = min(max(0, litres), compartments[index].capacityLitres)
+
+        if workspace == .site {
+            guard let fill = currentFill else { return }
+            guard compartments[index].product == fill.product else {
+                message = "\(compartments[index].product) cannot be used for this \(fill.product) fill."
+                return
+            }
+            let before = confirmedLitres[index]
+            guard clamped <= before else {
+                message = "Delivery cannot increase a compartment. Record a physical discrepancy through reconciliation."
+                return
+            }
+        }
+
+        draftLitres[index] = clamped
     }
 
     public func snapDelivery(compartment index: Int, proposed: Int) -> Int {
-        guard compartments.indices.contains(index) else { return proposed }
+        guard compartments.indices.contains(index), let fill = currentFill,
+              compartments[index].product == fill.product else {
+            return confirmedLitres.indices.contains(index) ? confirmedLitres[index] : proposed
+        }
         let confirmed = confirmedLitres
         let original = confirmed[index]
         let emptyTolerance = max(80, Int(Double(original) * 0.04))
@@ -219,21 +282,28 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func commitDelivery() {
-        guard workspace == .site, deliveryMovement > 0 else { return }
+        guard workspace == .site, deliveryDraftIsValid, let fill = currentFill else {
+            message = "Delivery draft not committed. Check product and compartment quantities."
+            return
+        }
         let before = confirmedLitres
         var candidate = cargoLedger
         let now = Date()
         do {
             for index in compartments.indices {
+                guard compartments[index].product == fill.product else { continue }
                 let removed = before[index] - draftLitres[index]
-                guard removed >= 0 else { continue }
+                guard removed >= 0 else {
+                    message = "Delivery draft not committed: compartment increase requires reconciliation."
+                    return
+                }
                 if removed > 0 {
                     let cargo = compartments[index].product == "ULP" ? ulpCargo : dieselCargo
                     try candidate.append(CargoTransaction(
                         kind: .unload, cargo: cargo, units: Double(removed),
                         sourceCompartmentID: compartments[index].cargoCompartmentID,
                         occurredAt: now, provenance: .driverEntered,
-                        note: "chunk5f.delivery:\(currentFill?.name ?? "unknown")"
+                        note: "chunk5f.delivery:\(fill.name)"
                     ))
                 }
             }

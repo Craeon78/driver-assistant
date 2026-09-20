@@ -17,6 +17,8 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         check("Moving makes Run view-only", !store.canReorderRun)
         store.moveVisit(from: IndexSet(integer: 0), to: 2)
         check("Moving prevents Run reorder", store.visits[0].site == firstSite)
+        let workspaceBeforeMovingOpen = store.workspace
+        check("Moving prevents Site workspace open", !store.openSite(0) && store.workspace == workspaceBeforeMovingOpen)
         store.setPrototypeMoving(false)
         store.moveVisit(from: IndexSet(integer: 0), to: 2)
         check("Stationary permits Run reorder", store.visits[0].site != firstSite)
@@ -26,6 +28,19 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         check("SeaLink Cleveland is one Site Visit", store.currentVisit?.site == "CLEVELAND")
         check("SeaLink Cleveland contains two Fill Items", store.currentVisit?.fills.count == 2)
         check("First Fill is Minjerrabah", store.currentFill?.name == "Minjerrabah")
+        store.workspace = .load
+        store.setDraft(compartment: 1, litres: 1000)
+        store.commitLoad()
+        store.openSite(0)
+        let c2BeforeWrongProduct = store.draftLitres[1]
+        check("Wrong-product fixture is non-zero", c2BeforeWrongProduct == 1000)
+        store.setDraft(compartment: 1, litres: 500)
+        check("Wrong-product compartment reduction is rejected for DIE fill", store.draftLitres[1] == c2BeforeWrongProduct)
+        let c2ConfirmedBeforeDelivery = store.confirmedLitres[1]
+        let unloadCountBeforeDelivery = store.cargoLedger.transactions.filter { $0.kind == .unload }.count
+        let c4BeforeIncrease = store.draftLitres[3]
+        store.setDraft(compartment: 3, litres: c4BeforeIncrease + 50)
+        check("Delivery increase is rejected for reconciliation path", store.draftLitres[3] == c4BeforeIncrease)
 
         store.setDraft(compartment: 3, litres: 0)
         store.setDraft(compartment: 4, litres: 5400)
@@ -36,8 +51,20 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.commitDelivery()
         check("Confirm commits C4 empty", store.confirmedLitres[3] == 0)
         check("Confirm commits C5 5400", store.confirmedLitres[4] == 5400)
-        check("Confirm appends unload transactions to CargoLedger", store.cargoLedger.transactions.filter { $0.kind == .unload }.count == 2)
+        let deliveryUnloads = store.cargoLedger.transactions.filter { $0.kind == .unload }
+        check("Confirm appends two matching-product unload transactions", deliveryUnloads.count == unloadCountBeforeDelivery + 2)
+        check("Wrong-product confirmed quantity survives DIE Confirm", store.confirmedLitres[1] == c2ConfirmedBeforeDelivery)
+        check("No ULP unload reaches CargoLedger during DIE Confirm", !deliveryUnloads.contains { $0.cargo.kind == "fuel.ulp" })
         check("Confirm first fill advances within same Site", store.workspace == .site && store.currentFill?.name == "Seabreeze")
+        store.setDraft(compartment: 0, litres: 0)
+        store.setDraft(compartment: 2, litres: 0)
+        store.setDraft(compartment: 4, litres: 0)
+        store.commitDelivery()
+        check("Final fill returns Active", store.workspace == .active)
+        check("Completed SeaLink visit cannot reopen", !store.openSite(0) && store.workspace == .active)
+        check("Next-site projection skips completed visit", store.nextIncompleteVisit?.site == "HEMMANT")
+        check("Open next skips completed visit", store.openNextIncompleteSite() && store.currentVisit?.site == "HEMMANT")
+        store.workspace = .active
 
         let beforeLoad = store.confirmedLitres[0]
         store.openLoad()
