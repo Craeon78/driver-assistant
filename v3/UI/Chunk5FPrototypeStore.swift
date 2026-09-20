@@ -68,6 +68,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private let ulpCargo: CargoKind
     private var draftBaseline: [Int]
 
+    public static let availableProducts = ["XLS", "ULP"]
+
     public init() {
         self.visits = [
             Chunk5FSiteVisit(
@@ -248,6 +250,19 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         message = "Draft reset."
     }
 
+    /// Practical product selection for Load mode. Does not allow changing product on a compartment that still holds liquid of a different product (respects residual/vapour boundary).
+    public func setProduct(compartment index: Int, product: String) {
+        guard compartments.indices.contains(index) else { return }
+        guard Self.availableProducts.contains(product) else { return }
+        let currentQty = confirmedLitres[index]
+        if currentQty > 0 && compartments[index].product != product {
+            message = "Cannot change product while liquid remains. Empty or reconcile first."
+            return
+        }
+        compartments[index].product = product
+        message = "C\(compartments[index].id) set to \(product)."
+    }
+
     public func setDraft(compartment index: Int, litres: Int) {
         guard draftLitres.indices.contains(index), compartments.indices.contains(index) else { return }
         let clamped = min(max(0, litres), compartments[index].capacityLitres)
@@ -285,7 +300,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
         let neededHere = max(0, plannedDelivery - movedElsewhere)
         let plannedRemaining = max(0, original - neededHere)
-        if abs(proposed - plannedRemaining) <= 120 { return plannedRemaining }
+        // Wider latch window + stronger pull to planned remaining (hysteresis support)
+        if abs(proposed - plannedRemaining) <= 150 { return plannedRemaining }
         return proposed
     }
 
@@ -326,13 +342,16 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             visits[selectedVisit].fills[selectedFill].completed = true
         }
 
-        message = "Confirmed \(deliveryMovement) L movement."
+        // Multi-fill progression: next incomplete fill becomes expected context, not a false start.
         if let next = visits[selectedVisit].fills.indices.first(where: { !visits[selectedVisit].fills[$0].completed }) {
             selectedFill = next
             resetDraft()
+            let nextFill = visits[selectedVisit].fills[next]
+            message = "Confirmed \(deliveryMovement) L. Next expected: \(nextFill.name) (\(nextFill.plannedLitres) L \(nextFill.product)) — not started."
             workspace = .site
         } else {
             resetDraft()
+            message = "Confirmed \(deliveryMovement) L. Site visit complete."
             workspace = .active
         }
     }
