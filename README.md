@@ -4,6 +4,10 @@ Driver Assistant is an in-cab iPad app project being developed for real-world fu
 
 It is designed to support safer, clearer, and more structured decision-making in day-to-day transport work, with a focus on practical field use rather than abstract theory.
 
+## Agents / CozzaHQ
+
+This repo is **product code**. How PREBUILD, BUILD, GO, review, and Playgrounds handoffs work lives in [`Craeon78/CozzaHQ`](https://github.com/Craeon78/CozzaHQ). Cold agents: read `AGENTS.md` here, then open CozzaHQ `docs/domain-routing.md`.
+
 ## Purpose
 
 The project is being developed to assist with operational thinking and record-keeping around:
@@ -43,7 +47,9 @@ Current development is in the **v0.2.x** phase, focused on stabilising core logi
 
 ```text
 README.md
+AGENTS.md
 PATCHLOG.md
 snapshots/
 architecture/
 experiments/
+```
