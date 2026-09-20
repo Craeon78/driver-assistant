@@ -41,13 +41,13 @@ public struct Chunk5FSiteVisit: Identifiable, Equatable, Sendable {
 
 public struct Chunk5FCompartment: Identifiable, Equatable, Sendable {
     public let id: Int
+    public let cargoCompartmentID: CanonicalID
     public var product: String
-    public var confirmedLitres: Int
     public var capacityLitres: Int
 
-    public init(id: Int, product: String, confirmedLitres: Int, capacityLitres: Int) {
-        self.id = id; self.product = product
-        self.confirmedLitres = confirmedLitres; self.capacityLitres = capacityLitres
+    public init(id: Int, cargoCompartmentID: CanonicalID = .fresh(), product: String, capacityLitres: Int) {
+        self.id = id; self.cargoCompartmentID = cargoCompartmentID
+        self.product = product; self.capacityLitres = capacityLitres
     }
 }
 
@@ -62,6 +62,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var restMinutes = 18
     @Published public var message = ""
 
+    public private(set) var cargoLedger: CargoLedger
+    private let dieselCargo: CargoKind
+    private let ulpCargo: CargoKind
     private var draftBaseline: [Int]
 
     public init() {
@@ -79,15 +82,35 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 fills: [Chunk5FFillItem(name: "Tank 1", product: "DIE", plannedLitres: 6500)]
             )
         ]
+        let diesel = CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L")
+        let ulp = CargoKind(name: "ULP", kind: "fuel.ulp", unitName: "L")
+        self.dieselCargo = diesel
+        self.ulpCargo = ulp
+
         self.compartments = [
-            Chunk5FCompartment(id: 1, product: "DIE", confirmedLitres: 4000, capacityLitres: 5360),
-            Chunk5FCompartment(id: 2, product: "ULP", confirmedLitres: 0, capacityLitres: 3240),
-            Chunk5FCompartment(id: 3, product: "DIE", confirmedLitres: 4500, capacityLitres: 4900),
-            Chunk5FCompartment(id: 4, product: "DIE", confirmedLitres: 3200, capacityLitres: 3250),
-            Chunk5FCompartment(id: 5, product: "DIE", confirmedLitres: 7200, capacityLitres: 7240)
+            Chunk5FCompartment(id: 1, product: "DIE", capacityLitres: 5360),
+            Chunk5FCompartment(id: 2, product: "ULP", capacityLitres: 3240),
+            Chunk5FCompartment(id: 3, product: "DIE", capacityLitres: 4900),
+            Chunk5FCompartment(id: 4, product: "DIE", capacityLitres: 3250),
+            Chunk5FCompartment(id: 5, product: "DIE", capacityLitres: 7240)
         ]
-        self.draftLitres = compartments.map(\.confirmedLitres)
-        self.draftBaseline = self.draftLitres
+
+        let limits = self.compartments.map { CargoCompartmentLimit(compartmentID: $0.cargoCompartmentID, capacityUnits: Double($0.capacityLitres)) }
+        var ledger = try! CargoLedger(limits: limits)
+        let opening = [4000, 0, 4500, 3200, 7200]
+        let openedAt = Date(timeIntervalSince1970: 1)
+        for (index, litres) in opening.enumerated() where litres > 0 {
+            let cargo = self.compartments[index].product == "ULP" ? ulp : diesel
+            try! ledger.append(CargoTransaction(
+                kind: .load, cargo: cargo, units: Double(litres),
+                destinationCompartmentID: self.compartments[index].cargoCompartmentID,
+                occurredAt: openedAt, recordedAt: openedAt,
+                provenance: .imported, note: "chunk5f.fixture.opening"
+            ))
+        }
+        self.cargoLedger = ledger
+        self.draftLitres = opening
+        self.draftBaseline = opening
     }
 
     public var currentVisit: Chunk5FSiteVisit? {
@@ -100,9 +123,17 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         return visit.fills[selectedFill]
     }
 
+    public var confirmedLitres: [Int] {
+        compartments.map { compartment in
+            guard let state = try? cargoLedger.state(compartmentID: compartment.cargoCompartmentID),
+                  let quantity = state.quantity else { return 0 }
+            return Int(quantity.units.rounded())
+        }
+    }
+
     public var deliveryMovement: Int {
-        zip(compartments, draftLitres).reduce(0) { total, pair in
-            total + max(0, pair.0.confirmedLitres - pair.1)
+        zip(confirmedLitres, draftLitres).reduce(0) { total, pair in
+            total + max(0, pair.0 - pair.1)
         }
     }
 
@@ -137,7 +168,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func resetDraft() {
-        draftLitres = compartments.map(\.confirmedLitres)
+        draftLitres = confirmedLitres
         draftBaseline = draftLitres
         message = ""
     }
@@ -154,14 +185,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func snapDelivery(compartment index: Int, proposed: Int) -> Int {
         guard compartments.indices.contains(index) else { return proposed }
-        let original = compartments[index].confirmedLitres
+        let confirmed = confirmedLitres
+        let original = confirmed[index]
         let emptyTolerance = max(80, Int(Double(original) * 0.04))
         if proposed <= emptyTolerance { return 0 }
 
-        let movedElsewhere = zip(compartments.indices, zip(compartments, draftLitres)).reduce(0) { total, entry in
+        let movedElsewhere = zip(compartments.indices, zip(confirmed, draftLitres)).reduce(0) { total, entry in
             let (otherIndex, pair) = entry
             guard otherIndex != index else { return total }
-            return total + max(0, pair.0.confirmedLitres - pair.1)
+            return total + max(0, pair.0 - pair.1)
         }
         let neededHere = max(0, plannedDelivery - movedElsewhere)
         let plannedRemaining = max(0, original - neededHere)
@@ -171,7 +203,28 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func commitDelivery() {
         guard workspace == .site, deliveryMovement > 0 else { return }
-        for index in compartments.indices { compartments[index].confirmedLitres = draftLitres[index] }
+        let before = confirmedLitres
+        var candidate = cargoLedger
+        let now = Date()
+        do {
+            for index in compartments.indices {
+                let removed = before[index] - draftLitres[index]
+                guard removed >= 0 else { continue }
+                if removed > 0 {
+                    let cargo = compartments[index].product == "ULP" ? ulpCargo : dieselCargo
+                    try candidate.append(CargoTransaction(
+                        kind: .unload, cargo: cargo, units: Double(removed),
+                        sourceCompartmentID: compartments[index].cargoCompartmentID,
+                        occurredAt: now, provenance: .driverEntered,
+                        note: "chunk5f.delivery:\(currentFill?.name ?? "unknown")"
+                    ))
+                }
+            }
+            cargoLedger = candidate
+        } catch {
+            message = "Delivery not committed: \(error)"
+            return
+        }
 
         if visits.indices.contains(selectedVisit),
            visits[selectedVisit].fills.indices.contains(selectedFill) {
@@ -193,17 +246,42 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         // Simulates extracted structured data only. No image is created or retained.
         resetDraft()
         let additions = [1000, 2000, 0, 0, 0]
+        let before = confirmedLitres
         for index in draftLitres.indices where index < additions.count {
-            setDraft(compartment: index, litres: compartments[index].confirmedLitres + additions[index])
+            setDraft(compartment: index, litres: before[index] + additions[index])
         }
         message = "SCAN RESULT — check the whole DA representation against the physical BOL."
     }
 
     public func commitLoad() {
         guard workspace == .load else { return }
-        for index in compartments.indices { compartments[index].confirmedLitres = draftLitres[index] }
-        draftBaseline = draftLitres
-        message = "Load recorded from driver-confirmed draft."
+        let before = confirmedLitres
+        var candidate = cargoLedger
+        let now = Date()
+        do {
+            for index in compartments.indices {
+                let added = draftLitres[index] - before[index]
+                guard added >= 0 else {
+                    message = "Load draft cannot silently remove confirmed cargo."
+                    return
+                }
+                if added > 0 {
+                    let cargo = compartments[index].product == "ULP" ? ulpCargo : dieselCargo
+                    try candidate.append(CargoTransaction(
+                        kind: .load, cargo: cargo, units: Double(added),
+                        destinationCompartmentID: compartments[index].cargoCompartmentID,
+                        occurredAt: now, provenance: .driverEntered,
+                        note: "chunk5f.load.confirmed"
+                    ))
+                }
+            }
+            cargoLedger = candidate
+        } catch {
+            message = "Load not committed: \(error)"
+            return
+        }
+        resetDraft()
+        message = "Load recorded through CargoLedger from driver-confirmed draft."
         workspace = .active
     }
 }
