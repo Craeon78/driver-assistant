@@ -27,7 +27,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     private var instrumentBar: some View {
         HStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-            VStack { Text("0").font(.title2.bold()); Text("km/h").font(.caption2) }
+            VStack { Text("\(store.prototypeSpeedKmh)").font(.title2.bold()); Text("km/h").font(.caption2) }
             VStack(alignment: .leading) { Text("ODO 482,315"); Text("Cleveland").font(.caption) }
             Image(systemName: "location.north.circle").font(.title2)
             Spacer()
@@ -89,8 +89,9 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
         }
         .overlay(alignment: .bottom) {
             HStack {
-                Button("OPEN NEXT SITE") { store.openSite(0) }
-                Button("TERMINAL / LOAD") { store.openLoad() }
+                Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh <= 5) }
+                Button("OPEN NEXT SITE") { store.openSite(0) }.disabled(store.prototypeSpeedKmh > 5)
+                Button("TERMINAL / LOAD") { store.openLoad() }.disabled(store.prototypeSpeedKmh > 5)
                 Button("START REST") { store.beginRest() }
             }.buttonStyle(.bordered).padding(8).background(.thinMaterial, in: Capsule())
         }
