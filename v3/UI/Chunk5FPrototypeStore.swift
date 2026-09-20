@@ -119,6 +119,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         return visits[selectedVisit]
     }
 
+    public var nextIncompleteVisitIndex: Int? {
+        visits.indices.first(where: { !visits[$0].isComplete })
+    }
+
+    public var nextIncompleteVisit: Chunk5FSiteVisit? {
+        guard let index = nextIncompleteVisitIndex else { return nil }
+        return visits[index]
+    }
+
     public var currentFill: Chunk5FFillItem? {
         guard let visit = currentVisit, visit.fills.indices.contains(selectedFill) else { return nil }
         return visit.fills[selectedFill]
@@ -195,7 +204,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     @discardableResult
     public func openNextIncompleteSite() -> Bool {
-        guard let index = visits.indices.first(where: { !visits[$0].isComplete }) else {
+        guard let index = nextIncompleteVisitIndex else {
             message = "No incomplete site visits."
             return false
         }
