@@ -74,7 +74,7 @@ The Site controls only set prototype messages. No Transfer or Reconciliation ope
 | opening `[4000,0,4500,3200,7200]` | imported into CargoLedger in store init | KEEP FIXTURE / REMOVE LIVE AUTHORITY | explicit deterministic-fixture construction only |
 | SeaLink 5000/9000 + Everstin 6500 | constructor Run fixture | KEEP FIXTURE / REMOVE LIVE AUTHORITY | explicit fixture only |
 | `draftLitres` | workspace draft | KEEP | drafts may be local |
-| `confirmedLitres` | reads CargoLedger | KEEP | correct projection source once commits reach ledger |
+| `confirmedLitres` | reads CargoLedger only | REWIRE P0 | project current cargo through `CargoStateReconciler.currentState` so committed ledger movements **and** reconciliation events are reflected |
 | `commitLoad()` | discards draft | REWIRE P0 | append confirmed Load movements |
 | `commitDelivery()` | completes plan fill only | REWIRE P0 | append confirmed unload movements |
 | Transfer/Reconcile buttons | message only | REWIRE P0 | commit real bounded operations |
@@ -99,7 +99,9 @@ Current effective path:
 
 Required path:
 
-`accepted opening/takeover baseline → authoritative CargoLedger projection → workspace draft → Confirm → committed operation/event → projection recalculated → every workspace reads it → persistence/replay → Gate Report from committed records`.
+`accepted opening/takeover baseline → authoritative cargo event streams → CargoStateReconciler current-state projection → workspace draft → Confirm → committed operation/reconciliation event → reconciled projection recalculated → every workspace reads it → persistence/replay → Gate Report from committed records`.
+
+**Reconciliation projection invariant:** `CargoLedger.state` alone is not authoritative current cargo after a reconciliation. Reconciliations remain a separate provenance-preserving stream in `CargoReconciliationLog`; all live current-cargo projections and the Gate Report must use `CargoStateReconciler.currentState` (or the equivalent shared reconciled projection) so a physical correction cannot later be resurrected as stale ledger cargo.
 
 Do not repair by passing values directly View-to-View.
 
@@ -129,9 +131,9 @@ This remains inside approved 5G scope:
 
 1. **Separate harness behaviour from scenario/evidence source.** Quarantine existing 5F deterministic values behind an explicit Fixture source; 5G field operation uses a Live source. Both feed the same authoritative V3 domain/event/cargo/persistence spine. Do not create duplicate cargo/event implementations for separate harnesses. Preserve an architectural seam for future Replay without implementing Replay in 5G.
 2. Implement vehicle-assumption cargo baseline UI: compact pre-shift compartment/product/quantity state plus Confirm/Edit. Acceptance establishes baseline with provenance; it is not a Load. Preserve the same boundary for later vehicle takeover.
-3. Make Confirm Load append real driver-confirmed movements to the authoritative cargo/event spine.
+3. Make Confirm Load append real driver-confirmed movements to the authoritative cargo/event spine, with displayed current cargo projected through the shared reconciler.
 4. Make Confirm Delivery append actual per-compartment unload movements, with subsequent fills/sites reading the resulting projection.
-5. Wire Transfer and Reconciliation to real committed operations.
+5. Wire Transfer and Reconciliation to real committed operations. Preserve reconciliation as its provenance-bearing stream and derive subsequent current cargo through `CargoStateReconciler.currentState`; do not treat raw `CargoLedger.state` as complete after reconciliation.
 6. Build live Gate Report solely from committed records. Capture timestamps at event commit. No plan/default/fixture substitution.
 7. Implement actual 5G save/relaunch/replay; a message is not persistence and cannot PASS.
 8. Add neutral Back/Close/Return to Active from draft operational workspaces. Navigation commits nothing.
