@@ -92,6 +92,8 @@ The harness may trial swipe-to-remove for an untouched future item, but 5G does 
 
 Completed items are not destructively removable.
 
+Removing an untouched future item removes it from the **current remaining-plan projection**. It must not require destructive erasure of evidence that the item previously existed in an earlier plan state. 5G does not require a full plan-versioning subsystem, but its implementation must not close the door on plan/revision provenance.
+
 ### Slice C — real cargo operations
 
 Remove dependence on simulated scenarios for actual field capture.
@@ -124,6 +126,7 @@ Remove dependence on simulated scenarios for actual field capture.
 - physical empty may reconcile a calculated residual;
 - no silent zeroing;
 - minimum correction path for erroneous harness input;
+- an erroneous committed value is corrected by an explicit provenance-preserving correction event/record, not by overwriting the original committed event;
 - provenance retained.
 
 The complete production correction UX is not part of 5G.
@@ -165,6 +168,8 @@ Required:
 After relaunch, the same committed history must reconstruct the same authoritative result.
 
 No new giant AppModel or second persistence truth store is permitted.
+
+5G persistence must reuse or extend the existing V3 authoritative event/persistence spine. Serialising a mutable 5G screen/workspace model may be used only for draft/UI crash recovery where consistent with existing autosave semantics; such a blob must never become the authoritative shift ledger or cargo truth.
 
 ### Slice F — minimal chronological reconstruction
 
@@ -213,6 +218,8 @@ Internal checks:
 - all confirmed Deliveries represented: PASS/FAIL;
 - unresolved discrepancy count;
 - persistence/replay reproduces committed result: PASS/FAIL.
+
+Gate integrity and real-world uncertainty are separate. A truthful unresolved discrepancy does **not** automatically fail DA's internal integrity gate. For example, cargo transaction/replay integrity may PASS while `unresolved physical discrepancies: 1`. Losing, hiding or silently resolving that discrepancy is the failure.
 
 Before post-mortem comparison it must state:
 
@@ -318,7 +325,7 @@ During the live test:
 4. allow reality to diverge from the plan;
 5. use minimum Work/Rest anchors;
 6. if DA cannot represent a real event truthfully, do not invent a workaround that falsifies history—record the blocker externally for the post-mortem;
-7. deliberately perform at least one safe app close/relaunch when practical to exercise recovery;
+7. deliberately perform at least one app close/relaunch **only when operationally safe and practical** to exercise recovery. Do not perform this test while driving, actively loading/unloading, handling hoses or dangerous goods, or during another task that requires the driver's attention;
 8. End Shift and generate the DA Gate Report **before** supplying the external company shift-end report for comparison.
 
 ## 10. Post-mortem inputs
@@ -373,3 +380,14 @@ After explicit GO, Bob will:
 8. not merge that implementation PR until the asynchronous review cycle is actually complete and Cory chooses to merge.
 
 **No implementation has been authorised by this prebuild document.**
+
+
+## 14. Niles / Costa prebuild review disposition
+
+The existing Intent-to-Build was reviewed without restarting PREBUILD.
+
+**Niles — architecture/integration: PASS WITH CLARIFICATIONS incorporated here.** Future-plan removal must not require erasing plan provenance, and Slice E must use the V3 authoritative event/persistence spine rather than promote a mutable workspace snapshot to truth.
+
+**Costa — safety/data-integrity red-team: PASS WITH GUARDRAILS incorporated here.** Recovery testing is subordinate to safe operations; committed-entry correction preserves provenance; and a truthful unresolved physical discrepancy is distinct from an internal integrity failure.
+
+These are guardrails on the existing seven-slice build, not additional 5G scope.
