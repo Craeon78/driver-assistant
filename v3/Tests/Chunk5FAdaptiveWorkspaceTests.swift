@@ -1,0 +1,50 @@
+import Foundation
+
+@MainActor
+public enum Chunk5FAdaptiveWorkspaceTests {
+    public static func run() -> [String] {
+        var output = ["=== V3 Chunk 5F Adaptive Workspace Gate ==="]
+        func check(_ label: String, _ condition: @autoclosure () -> Bool) {
+            output.append("\(label): \(condition() ? "PASS" : "FAIL")")
+        }
+
+        let store = Chunk5FPrototypeStore()
+        check("Starts pre-shift", store.workspace == .preShift)
+        store.startShift()
+        check("Start Shift enters Active", store.workspace == .active)
+
+        store.openSite(0)
+        check("SeaLink Cleveland is one Site Visit", store.currentVisit?.site == "CLEVELAND")
+        check("SeaLink Cleveland contains two Fill Items", store.currentVisit?.fills.count == 2)
+        check("First Fill is Minjerrabah", store.currentFill?.name == "Minjerrabah")
+
+        store.setDraft(compartment: 3, litres: 0)
+        store.setDraft(compartment: 4, litres: 5400)
+        check("C4/C5 field case derives 5000 L", store.deliveryMovement == 5000)
+        check("Confirmed C4 unchanged before Confirm", store.compartments[3].confirmedLitres == 3200)
+        check("Confirmed C5 unchanged before Confirm", store.compartments[4].confirmedLitres == 7200)
+
+        store.commitDelivery()
+        check("Confirm commits C4 empty", store.compartments[3].confirmedLitres == 0)
+        check("Confirm commits C5 5400", store.compartments[4].confirmedLitres == 5400)
+        check("Confirm first fill advances within same Site", store.workspace == .site && store.currentFill?.name == "Seabreeze")
+
+        let beforeLoad = store.compartments[0].confirmedLitres
+        store.openLoad()
+        store.simulateBOLScan()
+        check("Simulated BOL is additive to returned cargo", store.draftLitres[0] == beforeLoad + 1000)
+        check("Scan does not mutate confirmed cargo", store.compartments[0].confirmedLitres == beforeLoad)
+        store.undoDraft()
+        check("Undo restores load draft", store.draftLitres[0] == beforeLoad)
+
+        store.workspace = .active
+        store.beginRest()
+        check("Rest state is explicit", store.workspace == .rest)
+        store.endRest()
+        check("End Rest returns Active", store.workspace == .active)
+
+        output.append("---")
+        output.append(output.contains(where: { $0.hasSuffix("FAIL") }) ? "GATE FAIL" : "GATE PASS")
+        return output
+    }
+}
