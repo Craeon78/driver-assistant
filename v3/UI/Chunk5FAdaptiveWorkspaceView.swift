@@ -1,10 +1,15 @@
 import SwiftUI
 
+@MainActor
 public struct Chunk5FAdaptiveWorkspaceView: View {
     @StateObject private var store: Chunk5FPrototypeStore
 
-    public init(store: Chunk5FPrototypeStore = Chunk5FPrototypeStore()) {
+    public init(store: Chunk5FPrototypeStore) {
         _store = StateObject(wrappedValue: store)
+    }
+
+    public init() {
+        _store = StateObject(wrappedValue: Chunk5FPrototypeStore())
     }
 
     public var body: some View {
