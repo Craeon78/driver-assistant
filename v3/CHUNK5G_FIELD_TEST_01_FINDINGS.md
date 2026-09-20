@@ -103,11 +103,31 @@ Required path:
 
 Do not repair by passing values directly View-to-View.
 
+### Harness / evidence-source boundary
+
+Harness behaviour and evidence source are separate concerns.
+
+All V3 harnesses should exercise the same shared Driver Assistant domain/event/cargo/persistence spine. A harness may select an explicit source of scenario/evidence, but the harness itself must not own or silently substitute operational truth.
+
+Conceptual source classes:
+
+- **Fixture** — deterministic manufactured scenario for repeatable tests and regression.
+- **Live** — current driver-established inputs/evidence for a field run.
+- **Replay** — persisted evidence/events from a previous real shift, for future regression/reconstruction.
+
+**5G scope:** implement the separation needed for Fixture versus Live now. Do **not** build a historical Replay feature merely because this architecture anticipates it. However, 5G persistence and event storage must not be designed in a way that prevents a future Replay source.
+
+5F fixtures remain valuable and should not be deleted simply to make 5G safe. They should be quarantined behind an explicit Fixture source. The 5G field harness must use a Live source. Both feed the same authoritative V3 truth machinery; do not create separate CargoLedger/event implementations per harness.
+
+The governing invariant is:
+
+> **The selected source establishes the evidence. The harness exercises the app. The harness never silently substitutes evidence.**
+
 ## 4. Repair package for Bob
 
 This remains inside approved 5G scope:
 
-1. Separate deterministic fixture construction from live 5G construction.
+1. **Separate harness behaviour from scenario/evidence source.** Quarantine existing 5F deterministic values behind an explicit Fixture source; 5G field operation uses a Live source. Both feed the same authoritative V3 domain/event/cargo/persistence spine. Do not create duplicate cargo/event implementations for separate harnesses. Preserve an architectural seam for future Replay without implementing Replay in 5G.
 2. Implement vehicle-assumption cargo baseline UI: compact pre-shift compartment/product/quantity state plus Confirm/Edit. Acceptance establishes baseline with provenance; it is not a Load. Preserve the same boundary for later vehicle takeover.
 3. Make Confirm Load append real driver-confirmed movements to the authoritative cargo/event spine.
 4. Make Confirm Delivery append actual per-compartment unload movements, with subsequent fills/sites reading the resulting projection.
