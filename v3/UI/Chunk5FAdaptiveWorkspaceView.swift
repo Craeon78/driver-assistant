@@ -27,6 +27,17 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             .padding(12)
         }
+        .sheet(isPresented: $store.showGateReport) {
+            if let report = store.lastGateReport {
+                Chunk5GGateReportView(report: report) {
+                    store.showGateReport = false
+                }
+            } else {
+                Chunk5GGateReportView(report: store.makeDemoGateReport()) {
+                    store.showGateReport = false
+                }
+            }
+        }
     }
 
     private var instrumentBar: some View {
@@ -62,7 +73,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     private var preShift: some View {
         VStack(spacing: 16) {
-            // Large central primary action — Slice A.1
             Button {
                 store.startShift()
             } label: {
@@ -82,7 +92,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Divider()
                     Text("Running tank: Full")
                     Text("AdBlue: Full")
-                    Text("Planned cargo: 2,000 ULP • 38,500 XLS")  // DIE → XLS (Slice A.6 preview)
+                    Text("Planned cargo: 2,000 ULP • 38,500 XLS")
                 }
                 panel("TODAY") {
                     Text("No current attention items")
@@ -124,12 +134,27 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             Chunk5FRunView(store: store).frame(width: 280)
         }
         .overlay(alignment: .bottom) {
-            HStack {
-                Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh <= 5) }
-                Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }.disabled(store.prototypeSpeedKmh > 5)
-                Button("TERMINAL / LOAD") { store.openLoad() }.disabled(store.prototypeSpeedKmh > 5)
-                Button("START REST") { store.beginRest() }
-            }.buttonStyle(.bordered).padding(8).background(.thinMaterial, in: Capsule())
+            VStack(spacing: 6) {
+                if !store.message.isEmpty {
+                    Text(store.message).font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") {
+                        store.setPrototypeMoving(store.prototypeSpeedKmh <= 5)
+                    }
+                    Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }
+                        .disabled(store.prototypeSpeedKmh > 5)
+                    Button("TERMINAL / LOAD") { store.openLoad() }
+                        .disabled(store.prototypeSpeedKmh > 5)
+                    Button("START REST") { store.beginRest() }
+                    Button("RELAUNCH") { store.simulateRelaunch() }
+                    Button("END SHIFT") { store.endShiftDemo() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .buttonStyle(.bordered)
+                .padding(8)
+                .background(.thinMaterial, in: Capsule())
+            }
         }
     }
 
@@ -162,6 +187,18 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         Text("Difference \(store.deliveryDifference > 0 ? "+" : "")\(store.deliveryDifference) L")
                     }
                     Text("DRAG → CONTEXT SNAP → PRECISION → CONFIRM").font(.caption).foregroundStyle(.secondary)
+                    // Slice C escape paths
+                    HStack {
+                        Button("TRANSFER DEMO") {
+                            store.message = "Transfer C1→C3 recorded (prototype)."
+                        }
+                        .buttonStyle(.bordered)
+                        Button("RECONCILE EMPTY") {
+                            store.message = "Reconciliation: physical empty recorded (prototype)."
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.caption)
                 }.frame(width: 260)
             }
             HStack {
