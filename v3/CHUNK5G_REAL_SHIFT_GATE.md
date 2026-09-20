@@ -203,6 +203,10 @@ A real shift must have complete lifecycle boundaries.
 
 Start Shift requires the existing opening ODO/location checkpoint concept.
 
+At any point where the driver assumes responsibility for a vehicle — including shift start or a mid-shift vehicle change — DA must also establish a truthful **opening/takeover cargo baseline**. The driver must be able to verify or adjust the actual product and quantity already aboard each compartment before accepting that vehicle state. This covers returned product, activity that occurred while the driver was off duty, and taking over another vehicle with cargo aboard.
+
+An opening/takeover baseline is not a fabricated Load event. It records the observed/driver-established state at the responsibility boundary with provenance. Where a verified prior DA state is available it may be offered as the starting point, but the driver can correct it to the physical state being accepted.
+
 End Shift must at minimum capture:
 - closing ODO;
 - current vehicle;
@@ -329,7 +333,7 @@ Before the real shift, the harness must have:
 4. real manual Load capture;
 5. real Delivery capture with planned-versus-actual quantity;
 6. Transfer and reconciliation/correction escape paths;
-7. Start Shift and End Shift with ODO anchors;
+7. Start Shift and End Shift with ODO anchors, plus opening/takeover cargo baseline when responsibility for a vehicle is assumed;
 8. durable save/relaunch/recovery;
 9. minimal chronological reconstruction;
 10. End Shift Real-Shift Gate Report;
