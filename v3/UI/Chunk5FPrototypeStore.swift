@@ -60,6 +60,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var selectedVisit = 0
     @Published public var selectedFill = 0
     @Published public var restMinutes = 18
+    @Published public var prototypeSpeedKmh = 0
     @Published public var message = ""
 
     public private(set) var cargoLedger: CargoLedger
@@ -137,12 +138,28 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
     }
 
+    public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
+
     public var plannedDelivery: Int { currentFill?.plannedLitres ?? 0 }
     public var deliveryDifference: Int { deliveryMovement - plannedDelivery }
 
     public func startShift() {
         workspace = .active
         message = "Shift started — opening ODO checkpoint is a later harness."
+    }
+
+    public func moveVisit(from source: IndexSet, to destination: Int) {
+        guard canReorderRun else {
+            message = "Run reorder unavailable while moving."
+            return
+        }
+        visits.move(fromOffsets: source, toOffset: destination)
+        message = "Run order updated."
+    }
+
+    public func setPrototypeMoving(_ moving: Bool) {
+        prototypeSpeedKmh = moving ? 42 : 0
+        message = moving ? "Prototype moving state — run is view-only." : "Prototype stationary state — run can be reordered."
     }
 
     public func openSite(_ index: Int) {
