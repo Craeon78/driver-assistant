@@ -74,7 +74,23 @@ private struct CompartmentColumn: View {
                 )
             }
             .frame(height: 155)
-            Text(compartment.product).font(.caption)
+
+            // Practical product selection (Load mode only). Respects residual liquid boundary.
+            if mode == .load {
+                Picker("", selection: Binding(
+                    get: { store.compartments[index].product },
+                    set: { store.setProduct(compartment: index, product: $0) }
+                )) {
+                    ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { p in
+                        Text(p).tag(p)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            } else {
+                Text(compartment.product).font(.caption)
+            }
+
             TextField("L", value: Binding(
                 get: { store.draftLitres[index] },
                 set: { store.setDraft(compartment: index, litres: $0) }
