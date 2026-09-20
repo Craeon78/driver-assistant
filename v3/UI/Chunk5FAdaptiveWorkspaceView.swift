@@ -38,8 +38,16 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }.frame(maxWidth: 300)
             Spacer()
             VStack(alignment: .trailing) {
-                Text(store.workspace == .rest ? "RESTING" : "NEXT: SEALINK")
-                Text(store.workspace == .rest ? "Recovery first" : "Cleveland").font(.caption)
+                if store.workspace == .rest {
+                    Text("RESTING")
+                    Text("Recovery first").font(.caption)
+                } else if let next = store.nextIncompleteVisit {
+                    Text("NEXT: \(next.customer)")
+                    Text(next.site).font(.caption)
+                } else {
+                    Text("RUN COMPLETE")
+                    Text("No incomplete sites").font(.caption)
+                }
             }
             Image(systemName: "line.3.horizontal")
             Image(systemName: "gearshape")
@@ -71,17 +79,26 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     private var active: some View {
         HStack(alignment: .top, spacing: 12) {
             panel("NEXT SITE") {
-                Text("SEALINK").font(.title2.bold())
-                Text("Cleveland")
-                Text("05:00 requested • ETA 04:55")
-                Text("14,000 L DIE • 2 fills")
-                Button("Contact") { store.message = "Contact details would expand here." }
+                if let next = store.nextIncompleteVisit {
+                    Text(next.customer).font(.title2.bold())
+                    Text(next.site)
+                    if let requested = next.requestedTime {
+                        Text("\(requested) requested • ETA \(next.projectedTime)")
+                    } else {
+                        Text("ETA \(next.projectedTime)")
+                    }
+                    Text("\(next.plannedLitres.formatted()) L • \(next.fills.count) fill\(next.fills.count == 1 ? "" : "s")")
+                    Button("Contact") { store.message = "Contact details would expand here." }
+                } else {
+                    Text("RUN COMPLETE").font(.title2.bold())
+                    Text("No incomplete site visits")
+                }
             }.frame(width: 230)
             ZStack {
                 RoundedRectangle(cornerRadius: 14).fill(.quaternary)
                 VStack {
                     Image(systemName: "map").font(.system(size: 72))
-                    Text("MAP — current position → Cleveland")
+                    Text(store.nextIncompleteVisit.map { "MAP — current position → \($0.site)" } ?? "MAP — no next site")
                     Text("Driving state: status, not analysis").font(.caption).foregroundStyle(.secondary)
                 }
             }
