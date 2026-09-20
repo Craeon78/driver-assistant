@@ -74,13 +74,13 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 customer: "SEALINK", site: "CLEVELAND", requestedTime: "05:00",
                 projectedTime: "04:55",
                 fills: [
-                    Chunk5FFillItem(name: "Minjerrabah", product: "DIE", plannedLitres: 5000),
-                    Chunk5FFillItem(name: "Seabreeze", product: "DIE", plannedLitres: 9000)
+                    Chunk5FFillItem(name: "Minjerrabah", product: "XLS", plannedLitres: 5000),
+                    Chunk5FFillItem(name: "Seabreeze", product: "XLS", plannedLitres: 9000)
                 ]
             ),
             Chunk5FSiteVisit(
                 customer: "EVERSTIN", site: "HEMMANT", projectedTime: "06:35",
-                fills: [Chunk5FFillItem(name: "Tank 1", product: "DIE", plannedLitres: 6500)]
+                fills: [Chunk5FFillItem(name: "Tank 1", product: "XLS", plannedLitres: 6500)]
             )
         ]
         let diesel = CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L")
@@ -89,11 +89,11 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         self.ulpCargo = ulp
 
         let prototypeCompartments = [
-            Chunk5FCompartment(id: 1, product: "DIE", capacityLitres: 5360),
+            Chunk5FCompartment(id: 1, product: "XLS", capacityLitres: 5360),
             Chunk5FCompartment(id: 2, product: "ULP", capacityLitres: 3240),
-            Chunk5FCompartment(id: 3, product: "DIE", capacityLitres: 4900),
-            Chunk5FCompartment(id: 4, product: "DIE", capacityLitres: 3250),
-            Chunk5FCompartment(id: 5, product: "DIE", capacityLitres: 7240)
+            Chunk5FCompartment(id: 3, product: "XLS", capacityLitres: 4900),
+            Chunk5FCompartment(id: 4, product: "XLS", capacityLitres: 3250),
+            Chunk5FCompartment(id: 5, product: "XLS", capacityLitres: 7240)
         ]
 
         let limits = prototypeCompartments.map {
