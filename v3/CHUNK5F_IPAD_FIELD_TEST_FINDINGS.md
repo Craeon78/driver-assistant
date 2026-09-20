@@ -23,10 +23,13 @@ The major operational anchors and automatic evidence plumbing remain the same. D
 1. **Core anchors** — required/major facts needed for Driver Assistant to remain useful and truthful.
    Examples: shift boundaries, cargo-changing events, delivery/load confirmation, transfers, necessary reconciliation, ODO anchors, and work/rest facts required by the fatigue model.
 
-2. **Automatic evidence** — captured/derived without requiring repetitive driver entry where technically and ethically appropriate.
-   Examples: timestamps, GPS breadcrumbs, moving/stationary periods, location/site proximity, calculated cargo state, app interactions and run context.
+2. **Automatic evidence** — captured observations/signals without requiring repetitive driver entry where technically and ethically appropriate.
+   Examples: timestamps, GPS breadcrumbs, moving/stationary periods, location/site proximity and app interactions. These are evidence inputs; they do not become physical facts merely because DA captured them.
 
-3. **Optional operational refinement** — additional driver-established points or classifications that increase resolution.
+3. **Derived projections** — calculated views produced from authoritative committed events plus relevant evidence/context.
+   Examples: current calculated cargo balance, projected cargo state, Run projections and other snapshots. These are useful outputs, not independent evidence or source truth, and must never be fed back as if they were authoritative events.
+
+4. **Optional operational refinement** — additional driver-established points or classifications that increase resolution.
    Examples: waiting/demurrage, repositioning, prep, pack-up, paperwork, richer other-work classification, arrival/departure detail and operational notes.
 
 A higher-detail driver may therefore have secondary layers available from existing controls rather than a primary screen covered in extra buttons.
@@ -191,7 +194,16 @@ Correct shorthand discovered during field test:
 
 The 5F fixture's use of DIE to mean diesel must not migrate into production.
 
-Changing the product of an empty/proposed compartment can be simple. Changing the asserted product of a compartment that already contains confirmed/returned cargo is a physical contradiction and must use appropriate reconciliation/confirmation rather than silently relabelling cargo.
+Product selection for a **fresh/new compartment, an explicitly degassed/cleared compartment, or a draft compartment whose confirmed fuel state permits the change** can be simple.
+
+A compartment must retain **two distinct product-related states** where applicable:
+
+1. **liquid product state** — the product currently represented by litres in the compartment; and
+2. **residual/vapour state** — the chemically relevant product family/history that can remain when liquid reaches zero.
+
+Therefore **0 L does not mean blank or freely relabellable**. A previously used compartment can be liquid-empty while still carrying diesel residue or petrol-family vapour/residue. That residual state persists until an explicit valid state-changing event such as Degas clears it, in accordance with the Fuel/Cargo contract.
+
+Changing the asserted product where confirmed liquid cargo or incompatible residual/vapour state already exists must use the appropriate physical workflow/reconciliation rather than silently relabelling the compartment. The UI may make product selection easy; it must not collapse the two product states or bypass Fuel compatibility/state rules.
 
 ### Product colour
 
