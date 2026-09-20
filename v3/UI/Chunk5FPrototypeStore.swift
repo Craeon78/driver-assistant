@@ -29,10 +29,13 @@ public struct Chunk5FSiteVisit: Identifiable, Equatable, Sendable {
     public var requestedTime: String?
     public var projectedTime: String
     public var fills: [Chunk5FFillItem]
+    /// True when this visit was a Terminal / Load stop rather than a customer delivery.
+    public var isTerminalLoad: Bool
 
-    public init(id: UUID = UUID(), customer: String, site: String, requestedTime: String? = nil, projectedTime: String, fills: [Chunk5FFillItem]) {
+    public init(id: UUID = UUID(), customer: String, site: String, requestedTime: String? = nil, projectedTime: String, fills: [Chunk5FFillItem], isTerminalLoad: Bool = false) {
         self.id = id; self.customer = customer; self.site = site
         self.requestedTime = requestedTime; self.projectedTime = projectedTime; self.fills = fills
+        self.isTerminalLoad = isTerminalLoad
     }
 
     public var plannedLitres: Int { fills.reduce(0) { $0 + $1.plannedLitres } }
@@ -161,6 +164,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
     public var canOpenOperationalWorkspace: Bool { prototypeSpeedKmh <= 5 }
+    /// Remaining-plan mutations are allowed in pre-shift or while stationary/crawl and not in rest.
+    public var canMutateRemainingPlan: Bool {
+        (workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5))
+    }
 
     public var deliveryDraftIsValid: Bool {
         guard let fill = currentFill else { return false }
@@ -174,6 +181,91 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public var plannedDelivery: Int { currentFill?.plannedLitres ?? 0 }
     public var deliveryDifference: Int { deliveryMovement - plannedDelivery }
+
+    // MARK: - Plan Run mutations (Slice B)
+
+    /// Add a customer Site Visit to the remaining plan.
+    public func addSiteVisit(customer: String, site: String, product: String = "XLS", plannedLitres: Int = 5000) {
+        guard canMutateRemainingPlan else {
+            message = "Cannot add work while moving or in rest."
+            return
+        }
+        let fill = Chunk5FFillItem(name: "Fill 1", product: product, plannedLitres: plannedLitres)
+        let visit = Chunk5FSiteVisit(
+            customer: customer, site: site,
+            projectedTime: "—",
+            fills: [fill]
+        )
+        visits.append(visit)
+        message = "Added site visit: \(customer) — \(site)."
+    }
+
+    /// Add a Terminal / Load stop to the remaining plan.
+    public func addTerminalLoad() {
+        guard canMutateRemainingPlan else {
+            message = "Cannot add work while moving or in rest."
+            return
+        }
+        let visit = Chunk5FSiteVisit(
+            customer: "TERMINAL",
+            site: "LOAD",
+            projectedTime: "—",
+            fills: [Chunk5FFillItem(name: "Load", product: "XLS", plannedLitres: 0)],
+            isTerminalLoad: true
+        )
+        visits.append(visit)
+        message = "Added Terminal / Load stop."
+    }
+
+    /// Add an extra Fill to an existing incomplete Site Visit (same physical site).
+    public func addFill(toVisitIndex index: Int, name: String = "Extra Fill", product: String = "XLS", plannedLitres: Int = 3000) {
+        guard canMutateRemainingPlan else {
+            message = "Cannot add fill while moving or in rest."
+            return
+        }
+        guard visits.indices.contains(index), !visits[index].isComplete else {
+            message = "Cannot add fill to a completed visit."
+            return
+        }
+        visits[index].fills.append(Chunk5FFillItem(name: name, product: product, plannedLitres: plannedLitres))
+        message = "Added fill to \(visits[index].customer)."
+    }
+
+    /// Remove an untouched future Site Visit. Completed history is protected.
+    public func removeVisit(at index: Int) {
+        guard canMutateRemainingPlan else {
+            message = "Cannot remove while moving or in rest."
+            return
+        }
+        guard visits.indices.contains(index) else { return }
+        if visits[index].isComplete || visits[index].fills.contains(where: { $0.completed }) {
+            message = "Cannot remove a visit that has committed history."
+            return
+        }
+        let removed = visits.remove(at: index)
+        message = "Removed planned visit: \(removed.customer) — \(removed.site)."
+    }
+
+    /// Remove an untouched future Fill from a visit.
+    public func removeFill(visitIndex: Int, fillIndex: Int) {
+        guard canMutateRemainingPlan else {
+            message = "Cannot remove fill while moving or in rest."
+            return
+        }
+        guard visits.indices.contains(visitIndex),
+              visits[visitIndex].fills.indices.contains(fillIndex) else { return }
+        if visits[visitIndex].fills[fillIndex].completed {
+            message = "Cannot remove a completed fill."
+            return
+        }
+        // Keep at least one fill placeholder so the visit structure remains valid.
+        if visits[visitIndex].fills.count <= 1 {
+            message = "Cannot remove the last fill; remove the whole visit instead."
+            return
+        }
+        visits[visitIndex].fills.remove(at: fillIndex)
+        message = "Removed planned fill."
+    }
 
     public func startShift() {
         workspace = .active
@@ -300,7 +392,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
         let neededHere = max(0, plannedDelivery - movedElsewhere)
         let plannedRemaining = max(0, original - neededHere)
-        // Wider latch window + stronger pull to planned remaining (hysteresis support)
         if abs(proposed - plannedRemaining) <= 150 { return plannedRemaining }
         return proposed
     }
@@ -342,7 +433,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             visits[selectedVisit].fills[selectedFill].completed = true
         }
 
-        // Multi-fill progression: next incomplete fill becomes expected context, not a false start.
         if let next = visits[selectedVisit].fills.indices.first(where: { !visits[selectedVisit].fills[$0].completed }) {
             selectedFill = next
             resetDraft()
@@ -357,7 +447,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func simulateBOLScan() {
-        // Simulates extracted structured data only. No image is created or retained.
         resetDraft()
         let additions = [1000, 2000, 0, 0, 0]
         let before = confirmedLitres
