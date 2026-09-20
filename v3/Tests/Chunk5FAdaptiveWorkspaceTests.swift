@@ -21,19 +21,25 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.setDraft(compartment: 3, litres: 0)
         store.setDraft(compartment: 4, litres: 5400)
         check("C4/C5 field case derives 5000 L", store.deliveryMovement == 5000)
-        check("Confirmed C4 unchanged before Confirm", store.compartments[3].confirmedLitres == 3200)
-        check("Confirmed C5 unchanged before Confirm", store.compartments[4].confirmedLitres == 7200)
+        check("Confirmed C4 unchanged before Confirm", store.confirmedLitres[3] == 3200)
+        check("Confirmed C5 unchanged before Confirm", store.confirmedLitres[4] == 7200)
 
         store.commitDelivery()
-        check("Confirm commits C4 empty", store.compartments[3].confirmedLitres == 0)
-        check("Confirm commits C5 5400", store.compartments[4].confirmedLitres == 5400)
+        check("Confirm commits C4 empty", store.confirmedLitres[3] == 0)
+        check("Confirm commits C5 5400", store.confirmedLitres[4] == 5400)
+        check("Confirm appends unload transactions to CargoLedger", store.cargoLedger.transactions.filter { $0.kind == .unload }.count == 2)
         check("Confirm first fill advances within same Site", store.workspace == .site && store.currentFill?.name == "Seabreeze")
 
-        let beforeLoad = store.compartments[0].confirmedLitres
+        let beforeLoad = store.confirmedLitres[0]
         store.openLoad()
         store.simulateBOLScan()
         check("Simulated BOL is additive to returned cargo", store.draftLitres[0] == beforeLoad + 1000)
-        check("Scan does not mutate confirmed cargo", store.compartments[0].confirmedLitres == beforeLoad)
+        check("Scan does not mutate confirmed cargo", store.confirmedLitres[0] == beforeLoad)
+        let transactionCountBeforeLoadConfirm = store.cargoLedger.transactions.count
+        store.commitLoad()
+        check("Load Confirm appends through CargoLedger", store.cargoLedger.transactions.count > transactionCountBeforeLoadConfirm)
+        check("Load Confirm derives new confirmed quantity", store.confirmedLitres[0] == beforeLoad + 1000)
+        store.openLoad()
         store.undoDraft()
         check("Undo restores load draft", store.draftLitres[0] == beforeLoad)
 
