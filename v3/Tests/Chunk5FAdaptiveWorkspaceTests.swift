@@ -12,6 +12,15 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         check("Starts pre-shift", store.workspace == .preShift)
         store.startShift()
         check("Start Shift enters Active", store.workspace == .active)
+        let firstSite = store.visits[0].site
+        store.setPrototypeMoving(true)
+        check("Moving makes Run view-only", !store.canReorderRun)
+        store.moveVisit(from: IndexSet(integer: 0), to: 2)
+        check("Moving prevents Run reorder", store.visits[0].site == firstSite)
+        store.setPrototypeMoving(false)
+        store.moveVisit(from: IndexSet(integer: 0), to: 2)
+        check("Stationary permits Run reorder", store.visits[0].site != firstSite)
+        store.moveVisit(from: IndexSet(integer: 1), to: 0)
 
         store.openSite(0)
         check("SeaLink Cleveland is one Site Visit", store.currentVisit?.site == "CLEVELAND")
