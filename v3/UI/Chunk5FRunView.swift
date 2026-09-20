@@ -4,6 +4,13 @@ public struct Chunk5FRunView: View {
     @ObservedObject var store: Chunk5FPrototypeStore
     var subdued: Bool = false
 
+    @State private var draftCustomer = ""
+    @State private var draftSite = ""
+    @State private var draftFillName = "Fill 1"
+    @State private var draftProduct = "XLS"
+    @State private var draftPlanned = 0
+    @State private var showAddEditor = false
+
     public init(store: Chunk5FPrototypeStore, subdued: Bool = false) {
         self.store = store; self.subdued = subdued
     }
@@ -21,19 +28,53 @@ public struct Chunk5FRunView: View {
                 }
             }
 
-            // ADD WORK controls (pre-shift or stationary remaining-plan)
             if store.canMutateRemainingPlan {
                 HStack(spacing: 8) {
-                    Button("ADD SITE") {
-                        store.addSiteVisit(customer: "NEW CUSTOMER", site: "NEW SITE")
-                    }
-                    .buttonStyle(.bordered)
-                    Button("ADD TERMINAL") {
-                        store.addTerminalLoad()
-                    }
-                    .buttonStyle(.bordered)
+                    Button("ADD SITE") { showAddEditor = true }
+                        .buttonStyle(.bordered)
+                    Button("ADD TERMINAL") { store.addTerminalLoad() }
+                        .buttonStyle(.bordered)
                 }
                 .font(.caption)
+
+                if showAddEditor {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("New site (edit before insert)").font(.caption.bold())
+                        TextField("Customer", text: $draftCustomer).textFieldStyle(.roundedBorder)
+                        TextField("Site", text: $draftSite).textFieldStyle(.roundedBorder)
+                        TextField("Fill name", text: $draftFillName).textFieldStyle(.roundedBorder)
+                        HStack {
+                            Picker("Product", selection: $draftProduct) {
+                                ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                            }
+                            TextField("Planned L", value: $draftPlanned, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.numberPad)
+                                .frame(width: 100)
+                        }
+                        HStack {
+                            Button("CANCEL") { showAddEditor = false }
+                            Spacer()
+                            Button("INSERT INTO RUN") {
+                                store.addSiteVisit(
+                                    customer: draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    site: draftSite.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    fillName: draftFillName.isEmpty ? "Fill 1" : draftFillName,
+                                    product: draftProduct,
+                                    plannedLitres: max(0, draftPlanned)
+                                )
+                                draftCustomer = ""; draftSite = ""; draftFillName = "Fill 1"
+                                draftProduct = "XLS"; draftPlanned = 0
+                                showAddEditor = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                      || draftSite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                }
             }
 
             List {
@@ -49,8 +90,7 @@ public struct Chunk5FRunView: View {
                                 Button(role: .destructive) {
                                     store.removeVisit(at: index)
                                 } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption)
+                                    Image(systemName: "trash").font(.caption)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -67,29 +107,25 @@ public struct Chunk5FRunView: View {
                                         Button(role: .destructive) {
                                             store.removeFill(visitIndex: index, fillIndex: fillIndex)
                                         } label: {
-                                            Image(systemName: "minus.circle")
-                                                .font(.caption2)
+                                            Image(systemName: "minus.circle").font(.caption2)
                                         }
                                         .buttonStyle(.plain)
                                     }
                                 }
-                            }
-                            if store.canMutateRemainingPlan && !visit.isComplete {
-                                Button("ADD FILL") {
-                                    store.addFill(toVisitIndex: index)
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.bordered)
                             }
                         }
                     }
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if store.workspace != .rest && store.canOpenOperationalWorkspace && !visit.isComplete && !visit.isTerminalLoad {
-                            store.openSite(index)
-                        } else if visit.isTerminalLoad && store.canOpenOperationalWorkspace {
+                        // Only open operational workspace from Active when stationary — not from pre-shift planning.
+                        guard store.workspace == .active,
+                              store.canOpenOperationalWorkspace,
+                              !visit.isComplete else { return }
+                        if visit.isTerminalLoad {
                             store.openLoad()
+                        } else {
+                            store.openSite(index)
                         }
                     }
                 }
