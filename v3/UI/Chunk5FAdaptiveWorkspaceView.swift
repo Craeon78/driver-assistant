@@ -9,7 +9,8 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     public init() {
-        _store = StateObject(wrappedValue: Chunk5FPrototypeStore())
+        // Live evidence source — no fixture authority on the field path.
+        _store = StateObject(wrappedValue: Chunk5FPrototypeStore(evidenceSource: .live))
     }
 
     public var body: some View {
@@ -32,10 +33,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Chunk5GGateReportView(report: report) {
                     store.showGateReport = false
                 }
-            } else {
-                Chunk5GGateReportView(report: store.makeDemoGateReport()) {
-                    store.showGateReport = false
-                }
             }
         }
     }
@@ -44,7 +41,10 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
         HStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
             VStack { Text("\(store.prototypeSpeedKmh)").font(.title2.bold()); Text("km/h").font(.caption2) }
-            VStack(alignment: .leading) { Text("ODO 482,315"); Text("Cleveland").font(.caption) }
+            VStack(alignment: .leading) {
+                Text("ODO \(store.openingODO.map { "\($0)" } ?? "—")")
+                Text(store.evidenceSource == .live ? "LIVE" : "FIXTURE").font(.caption)
+            }
             Image(systemName: "location.north.circle").font(.title2)
             Spacer()
             VStack {
@@ -61,8 +61,8 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text("NEXT: \(next.customer)")
                     Text(next.site).font(.caption)
                 } else {
-                    Text("RUN COMPLETE")
-                    Text("No incomplete sites").font(.caption)
+                    Text(store.visits.isEmpty ? "NO RUN YET" : "RUN COMPLETE")
+                    Text(store.openingBaselineAccepted ? "Baseline OK" : "Baseline required").font(.caption)
                 }
             }
             Image(systemName: "line.3.horizontal")
@@ -72,36 +72,63 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var preShift: some View {
-        VStack(spacing: 16) {
-            Button {
-                store.startShift()
-            } label: {
-                Text("START SHIFT")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 22)
+        HStack(alignment: .top, spacing: 14) {
+            panel("DRIVER / TRUCK") {
+                Text("DRIVER: MACOZZA").font(.title3.bold())
+                Text("Truck 92 • selected")
+                Divider()
+                Text("Opening cargo (vehicle assumption)").font(.headline)
+                Text("Confirm what is already aboard. This is not a Load.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(Array(store.compartments.enumerated()), id: \.element.id) { index, c in
+                    HStack {
+                        Text("C\(c.id) \(c.product)")
+                        Spacer()
+                        TextField("L", value: Binding(
+                            get: { store.draftLitres[index] },
+                            set: { store.setOpeningDraft(compartment: index, litres: $0) }
+                        ), format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                        .keyboardType(.numberPad)
+                    }
+                    .font(.caption)
+                }
+                if store.openingBaselineAccepted {
+                    Text("Baseline accepted: \(store.cargoOpeningSnapshot.map(String.init).joined(separator: ", "))")
+                        .font(.caption2).foregroundStyle(.green)
+                } else {
+                    Button("CONFIRM OPENING BASELINE") {
+                        store.acceptOpeningBaseline()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(.green)
 
-            HStack(alignment: .top, spacing: 14) {
-                panel("DRIVER / TRUCK") {
-                    Text("DRIVER: MACOZZA").font(.title3.bold())
-                    Text("Truck 92 • selected")
-                    Divider()
-                    Text("Running tank: Full")
-                    Text("AdBlue: Full")
-                    Text("Planned cargo: 2,000 ULP • 38,500 XLS")
+            panel("TODAY") {
+                // START SHIFT — centre of middle column, prominent but not full-width banner
+                Button {
+                    store.startShift()
+                } label: {
+                    Text("START SHIFT")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .frame(maxWidth: 280)
+                        .padding(.vertical, 16)
                 }
-                panel("TODAY") {
-                    Text("No current attention items")
-                    Spacer()
-                    Text("This month").font(.caption).foregroundStyle(.secondary)
-                    Text("Litres delivered  •  km driven")
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(!store.openingBaselineAccepted)
+                .frame(maxWidth: .infinity)
+
+                if !store.message.isEmpty {
+                    Text(store.message).font(.caption).foregroundStyle(.secondary)
                 }
-                Chunk5FRunView(store: store).frame(maxWidth: .infinity)
+                Spacer()
+                Text("This month").font(.caption).foregroundStyle(.secondary)
+                Text("Litres delivered  •  km driven")
             }
+
+            Chunk5FRunView(store: store).frame(maxWidth: .infinity)
         }
     }
 
@@ -117,11 +144,12 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         Text("ETA \(next.projectedTime)")
                     }
                     Text("\(next.plannedLitres.formatted()) L • \(next.fills.count) fill\(next.fills.count == 1 ? "" : "s")")
-                    Button("Contact") { store.message = "Contact details would expand here." }
                 } else {
-                    Text("RUN COMPLETE").font(.title2.bold())
-                    Text("No incomplete site visits")
+                    Text(store.visits.isEmpty ? "NO SITES PLANNED" : "RUN COMPLETE").font(.title2.bold())
+                    Text("Add work from the Run panel when stationary.")
                 }
+                Text("Cargo: \(store.confirmedLitres.map(String.init).joined(separator: ", "))")
+                    .font(.caption2).foregroundStyle(.secondary)
             }.frame(width: 230)
             ZStack {
                 RoundedRectangle(cornerRadius: 14).fill(.quaternary)
@@ -148,7 +176,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         .disabled(store.prototypeSpeedKmh > 5)
                     Button("START REST") { store.beginRest() }
                     Button("RELAUNCH") { store.simulateRelaunch() }
-                    Button("END SHIFT") { store.endShiftDemo() }
+                    Button("END SHIFT") { store.endShift() }
                         .buttonStyle(.borderedProminent)
                 }
                 .buttonStyle(.bordered)
@@ -160,6 +188,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     private var site: some View {
         VStack(spacing: 12) {
+            HStack {
+                Button("BACK TO ACTIVE") { store.returnToActive() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Text("Leaving discards draft — no event committed")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack(spacing: 12) {
                 panel("SITE") {
                     Text("Mini Map • Cleveland")
@@ -169,7 +204,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text(store.currentVisit.map { "\($0.customer) — \($0.site)" } ?? "—").bold()
                     Text(store.currentFill?.name ?? "—").font(.title2)
                     Text("\(store.currentFill?.plannedLitres.formatted() ?? "0") L \(store.currentFill?.product ?? "") planned")
-                    Button("Contact") { store.message = "Contact details would expand here." }
                 }
             }
             HStack(alignment: .top, spacing: 16) {
@@ -186,15 +220,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     if store.deliveryDifference != 0 {
                         Text("Difference \(store.deliveryDifference > 0 ? "+" : "")\(store.deliveryDifference) L")
                     }
-                    Text("DRAG → CONTEXT SNAP → PRECISION → CONFIRM").font(.caption).foregroundStyle(.secondary)
-                    // Slice C escape paths
                     HStack {
-                        Button("TRANSFER DEMO") {
-                            store.message = "Transfer C1→C3 recorded (prototype)."
+                        Button("TRANSFER 200 C1→C3") {
+                            store.commitTransfer(from: 0, to: 2, litres: 200)
                         }
                         .buttonStyle(.bordered)
-                        Button("RECONCILE EMPTY") {
-                            store.message = "Reconciliation: physical empty recorded (prototype)."
+                        Button("RECONCILE C4 EMPTY") {
+                            store.commitReconciliation(compartment: 3, observedLitres: 0, note: "Physical empty")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -212,6 +244,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     private var load: some View {
         VStack(spacing: 12) {
+            HStack {
+                Button("BACK TO ACTIVE") { store.returnToActive() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Text("Leaving discards draft — no event committed")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack(alignment: .top, spacing: 12) {
                 panel("TERMINAL") { Text("Mini Map"); Text("Safe stopped capture outside terminal") }
                 panel("DRIVER LOAD PLAN") {
@@ -221,7 +260,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 panel("PAPERWORK") {
                     Text("BOL likeness • EIP status")
                     Text("DA representation — not official document").font(.caption)
-                    Button("SHOW DETAILS") { store.message = "Structured BOL/EIP likeness expands here." }
                 }
             }
             Text("PROPOSED TRUCK CARGO").font(.headline)
@@ -243,20 +281,14 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             VStack(spacing: 12) {
                 panel("MINI MAP") { Text("Current location"); Text("Work context available on request").font(.caption) }
                 panel("SHIFT SO FAR") {
-                    Text("1 site • 2 deliveries")
-                    Text("14,000 L delivered")
-                    Text("Distance and terminal loads would project here.")
+                    Text("\(store.eventLog.filter { $0.kind == .delivery }.count) deliveries logged")
+                    Text("Events: \(store.eventLog.count)")
                 }
             }.frame(maxWidth: .infinity)
             panel("FATIGUE") {
                 Text("CURRENT REST").font(.headline)
                 Text("\(store.restMinutes) / 30 min").font(.system(size: 42, weight: .bold))
                 ProgressView(value: Double(store.restMinutes), total: 30)
-                Text("\(max(0, 30 - store.restMinutes)) min remaining")
-                Divider()
-                Text("Started shift 03:42")
-                Text("Work elapsed 3h 16m")
-                Text("Estimated finish 13:10").foregroundStyle(.secondary)
                 Button("END REST") { store.endRest() }.buttonStyle(.borderedProminent)
             }.frame(maxWidth: .infinity)
             Chunk5FRunView(store: store, subdued: true).frame(maxWidth: .infinity)
