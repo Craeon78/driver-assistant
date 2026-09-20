@@ -88,7 +88,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         self.dieselCargo = diesel
         self.ulpCargo = ulp
 
-        self.compartments = [
+        let prototypeCompartments = [
             Chunk5FCompartment(id: 1, product: "DIE", capacityLitres: 5360),
             Chunk5FCompartment(id: 2, product: "ULP", capacityLitres: 3240),
             Chunk5FCompartment(id: 3, product: "DIE", capacityLitres: 4900),
@@ -96,19 +96,27 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             Chunk5FCompartment(id: 5, product: "DIE", capacityLitres: 7240)
         ]
 
-        let limits = self.compartments.map { CargoCompartmentLimit(compartmentID: $0.cargoCompartmentID, capacityUnits: Double($0.capacityLitres)) }
+        let limits = prototypeCompartments.map {
+            CargoCompartmentLimit(
+                compartmentID: $0.cargoCompartmentID,
+                capacityUnits: Double($0.capacityLitres)
+            )
+        }
+
         var ledger = try! CargoLedger(limits: limits)
         let opening = [4000, 0, 4500, 3200, 7200]
         let openedAt = Date(timeIntervalSince1970: 1)
         for (index, litres) in opening.enumerated() where litres > 0 {
-            let cargo = self.compartments[index].product == "ULP" ? ulp : diesel
+            let cargo = prototypeCompartments[index].product == "ULP" ? ulp : diesel
             try! ledger.append(CargoTransaction(
                 kind: .load, cargo: cargo, units: Double(litres),
-                destinationCompartmentID: self.compartments[index].cargoCompartmentID,
+                destinationCompartmentID: prototypeCompartments[index].cargoCompartmentID,
                 occurredAt: openedAt, recordedAt: openedAt,
                 provenance: .imported, note: "chunk5f.fixture.opening"
             ))
         }
+
+        self.compartments = prototypeCompartments
         self.cargoLedger = ledger
         self.draftLitres = opening
         self.draftBaseline = opening
