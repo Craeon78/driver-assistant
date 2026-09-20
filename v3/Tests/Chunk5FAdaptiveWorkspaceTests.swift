@@ -36,6 +36,8 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         check("Wrong-product fixture is non-zero", c2BeforeWrongProduct == 1000)
         store.setDraft(compartment: 1, litres: 500)
         check("Wrong-product compartment reduction is rejected for DIE fill", store.draftLitres[1] == c2BeforeWrongProduct)
+        let c2ConfirmedBeforeDelivery = store.confirmedLitres[1]
+        let unloadCountBeforeDelivery = store.cargoLedger.transactions.filter { $0.kind == .unload }.count
         let c4BeforeIncrease = store.draftLitres[3]
         store.setDraft(compartment: 3, litres: c4BeforeIncrease + 50)
         check("Delivery increase is rejected for reconciliation path", store.draftLitres[3] == c4BeforeIncrease)
@@ -49,7 +51,10 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.commitDelivery()
         check("Confirm commits C4 empty", store.confirmedLitres[3] == 0)
         check("Confirm commits C5 5400", store.confirmedLitres[4] == 5400)
-        check("Confirm appends unload transactions to CargoLedger", store.cargoLedger.transactions.filter { $0.kind == .unload }.count == 2)
+        let deliveryUnloads = store.cargoLedger.transactions.filter { $0.kind == .unload }
+        check("Confirm appends two matching-product unload transactions", deliveryUnloads.count == unloadCountBeforeDelivery + 2)
+        check("Wrong-product confirmed quantity survives DIE Confirm", store.confirmedLitres[1] == c2ConfirmedBeforeDelivery)
+        check("No ULP unload reaches CargoLedger during DIE Confirm", !deliveryUnloads.contains { $0.cargo.kind == "fuel.ulp" })
         check("Confirm first fill advances within same Site", store.workspace == .site && store.currentFill?.name == "Seabreeze")
         store.setDraft(compartment: 0, litres: 0)
         store.setDraft(compartment: 2, litres: 0)
