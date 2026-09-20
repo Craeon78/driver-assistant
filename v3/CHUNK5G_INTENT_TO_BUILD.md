@@ -1,9 +1,10 @@
 # Chunk 5G — Bob Intent-to-Build: Real-Shift Harness
 
-**Status:** PREBUILD — AWAITING GO  
+**Status:** APPROVED / GO — BUILDING  
+**GO timestamp:** 2026-09-21 (Cory explicit GO via Jarvis coordination)  
 **Target:** iPad / Swift Playgrounds V3 test harness  
 **Base authority:** `v3/CHUNK5G_REAL_SHIFT_GATE.md` plus existing V3 contracts  
-**Implementation rule:** This document authorises planning only. No 5G Swift implementation begins until Cory gives an explicit **GO** after review.
+**Implementation rule:** Explicit GO received. Bob is authorised to implement the seven slices on branch `chunk-5g-real-shift-harness`. No scope expansion beyond this Intent-to-Build.
 
 ## 1. Intent
 
@@ -387,8 +388,7 @@ After explicit GO, Bob will:
 7. prepare the implementation PR for Codex/Niles review;
 8. not merge that implementation PR until the asynchronous review cycle is actually complete and Cory chooses to merge.
 
-**No implementation has been authorised by this prebuild document.**
-
+**GO received 2026-09-21. Implementation authorised on branch `chunk-5g-real-shift-harness`.**
 
 ## 14. Niles / Costa prebuild review disposition
 

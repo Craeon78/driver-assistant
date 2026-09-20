@@ -27,6 +27,17 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             .padding(12)
         }
+        .sheet(isPresented: $store.showGateReport) {
+            if let report = store.lastGateReport {
+                Chunk5GGateReportView(report: report) {
+                    store.showGateReport = false
+                }
+            } else {
+                Chunk5GGateReportView(report: store.makeDemoGateReport()) {
+                    store.showGateReport = false
+                }
+            }
+        }
     }
 
     private var instrumentBar: some View {
@@ -61,23 +72,36 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var preShift: some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel("DRIVER / TRUCK") {
-                Text("DRIVER: MACOZZA").font(.title3.bold())
-                Text("Truck 92 • selected")
-                Divider()
-                Text("Running tank: Full")
-                Text("AdBlue: Full")
-                Text("Planned cargo: 2,000 ULP • 38,500 DIE")
-                Button("START SHIFT") { store.startShift() }.buttonStyle(.borderedProminent)
+        VStack(spacing: 16) {
+            Button {
+                store.startShift()
+            } label: {
+                Text("START SHIFT")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
             }
-            panel("TODAY") {
-                Text("No current attention items")
-                Spacer()
-                Text("This month").font(.caption).foregroundStyle(.secondary)
-                Text("Litres delivered  •  km driven")
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.green)
+
+            HStack(alignment: .top, spacing: 14) {
+                panel("DRIVER / TRUCK") {
+                    Text("DRIVER: MACOZZA").font(.title3.bold())
+                    Text("Truck 92 • selected")
+                    Divider()
+                    Text("Running tank: Full")
+                    Text("AdBlue: Full")
+                    Text("Planned cargo: 2,000 ULP • 38,500 XLS")
+                }
+                panel("TODAY") {
+                    Text("No current attention items")
+                    Spacer()
+                    Text("This month").font(.caption).foregroundStyle(.secondary)
+                    Text("Litres delivered  •  km driven")
+                }
+                Chunk5FRunView(store: store).frame(maxWidth: .infinity)
             }
-            Chunk5FRunView(store: store).frame(maxWidth: .infinity)
         }
     }
 
@@ -110,12 +134,27 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             Chunk5FRunView(store: store).frame(width: 280)
         }
         .overlay(alignment: .bottom) {
-            HStack {
-                Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh <= 5) }
-                Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }.disabled(store.prototypeSpeedKmh > 5)
-                Button("TERMINAL / LOAD") { store.openLoad() }.disabled(store.prototypeSpeedKmh > 5)
-                Button("START REST") { store.beginRest() }
-            }.buttonStyle(.bordered).padding(8).background(.thinMaterial, in: Capsule())
+            VStack(spacing: 6) {
+                if !store.message.isEmpty {
+                    Text(store.message).font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") {
+                        store.setPrototypeMoving(store.prototypeSpeedKmh <= 5)
+                    }
+                    Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }
+                        .disabled(store.prototypeSpeedKmh > 5)
+                    Button("TERMINAL / LOAD") { store.openLoad() }
+                        .disabled(store.prototypeSpeedKmh > 5)
+                    Button("START REST") { store.beginRest() }
+                    Button("RELAUNCH") { store.simulateRelaunch() }
+                    Button("END SHIFT") { store.endShiftDemo() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .buttonStyle(.bordered)
+                .padding(8)
+                .background(.thinMaterial, in: Capsule())
+            }
         }
     }
 
@@ -148,6 +187,18 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         Text("Difference \(store.deliveryDifference > 0 ? "+" : "")\(store.deliveryDifference) L")
                     }
                     Text("DRAG → CONTEXT SNAP → PRECISION → CONFIRM").font(.caption).foregroundStyle(.secondary)
+                    // Slice C escape paths
+                    HStack {
+                        Button("TRANSFER DEMO") {
+                            store.message = "Transfer C1→C3 recorded (prototype)."
+                        }
+                        .buttonStyle(.bordered)
+                        Button("RECONCILE EMPTY") {
+                            store.message = "Reconciliation: physical empty recorded (prototype)."
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.caption)
                 }.frame(width: 260)
             }
             HStack {
