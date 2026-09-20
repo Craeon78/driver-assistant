@@ -90,7 +90,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
         .overlay(alignment: .bottom) {
             HStack {
                 Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh <= 5) }
-                Button("OPEN NEXT SITE") { store.openSite(0) }.disabled(store.prototypeSpeedKmh > 5)
+                Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }.disabled(store.prototypeSpeedKmh > 5)
                 Button("TERMINAL / LOAD") { store.openLoad() }.disabled(store.prototypeSpeedKmh > 5)
                 Button("START REST") { store.beginRest() }
             }.buttonStyle(.bordered).padding(8).background(.thinMaterial, in: Capsule())
@@ -132,7 +132,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
                 Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") { store.commitDelivery() }
-                    .buttonStyle(.borderedProminent).disabled(store.deliveryMovement == 0)
+                    .buttonStyle(.borderedProminent).disabled(!store.deliveryDraftIsValid)
             }
         }
     }
