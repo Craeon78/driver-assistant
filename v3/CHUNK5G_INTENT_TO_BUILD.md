@@ -137,10 +137,15 @@ Wire a complete real lifecycle:
 
 `PRE-SHIFT → START SHIFT → opening checkpoint → ACTIVE/operations → END SHIFT → closing checkpoint → GATE REPORT`
 
-Opening checkpoint:
+Opening checkpoint / vehicle-responsibility boundary:
 - selected vehicle;
 - opening driver-entered ODO;
-- location/context where available without making it mandatory truth.
+- location/context where available without making it mandatory truth;
+- verify or adjust the actual product and quantity already aboard each compartment before accepting responsibility for that vehicle state.
+
+The same cargo-baseline capability applies if the driver changes/takes over a different vehicle mid-shift with product already aboard. It must support returned product and changes that occurred while the driver was off duty.
+
+This is an **opening/takeover cargo baseline**, not a fabricated Load. If a verified prior DA carryover exists it may seed the proposed state, but the driver must be able to establish the physical state actually being accepted. The baseline/correction retains provenance.
 
 Closing checkpoint:
 - closing driver-entered ODO;
@@ -216,6 +221,8 @@ Internal checks:
 - Work/Rest timeline sufficiently complete for 5G: PASS/FAIL;
 - all confirmed Loads represented: PASS/FAIL;
 - all confirmed Deliveries represented: PASS/FAIL;
+- all confirmed Transfers represented: PASS/FAIL;
+- all confirmed Reconciliations/corrections represented: PASS/FAIL;
 - unresolved discrepancy count;
 - persistence/replay reproduces committed result: PASS/FAIL.
 
@@ -288,16 +295,17 @@ If one of these proves to be a genuine blocker during the real shift, record the
 
 Before handing the harness to the real shift, Bob will run deterministic fixtures covering at minimum:
 
-1. **Plan deviation:** planned A→B; execute B→A; completed order settles to actual without rewriting remaining intent.
-2. **Live add/remove:** add an unexpected future stop; remove an untouched planned stop; completed history remains protected.
-3. **Multi-fill:** Fill 1 confirms; Fill 2 becomes expected context, not falsely started.
-4. **Load with returned product:** opening cargo + new Load yields correct post-load projection/commit.
-5. **Delivery variance:** actual differs from planned quantity.
-6. **Physical-empty reconciliation:** calculated residual explicitly reconciled to empty.
-7. **Transfer:** compartment-to-compartment movement preserves total cargo.
-8. **Fat-finger correction escape:** erroneous committed harness input can be corrected without destructive rewrite.
-9. **Crash/relaunch:** terminate during an active shift; committed history and remaining plan reconstruct.
-10. **End Shift:** closing ODO commits and Gate Report reconstructs the same day.
+1. **Opening/takeover cargo:** begin with product already aboard, verify/adjust the compartment baseline without fabricating a Load; repeat the responsibility-boundary behaviour for a mid-shift vehicle takeover.
+2. **Plan deviation:** planned A→B; execute B→A; completed order settles to actual without rewriting remaining intent.
+3. **Live add/remove:** add an unexpected future stop; remove an untouched planned stop; completed history remains protected.
+4. **Multi-fill:** Fill 1 confirms; Fill 2 becomes expected context, not falsely started.
+5. **Load with returned product:** opening cargo + new Load yields correct post-load projection/commit.
+6. **Delivery variance:** actual differs from planned quantity.
+7. **Physical-empty reconciliation:** calculated residual explicitly reconciled to empty.
+8. **Transfer:** compartment-to-compartment movement preserves total cargo.
+9. **Fat-finger correction escape:** erroneous committed harness input can be corrected without destructive rewrite.
+10. **Crash/relaunch:** terminate during an active shift; committed history and remaining plan reconstruct.
+11. **End Shift:** closing ODO commits and Gate Report reconstructs the same day.
 
 ## 8. iPad pre-live gate
 
