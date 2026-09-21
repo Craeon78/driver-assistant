@@ -10,10 +10,23 @@ public struct Chunk5FRunView: View {
     @State private var draftProduct = "XLS"
     @State private var draftPlanned = 0
     @State private var showAddEditor = false
+
     @State private var addFillVisitIndex: Int? = nil
     @State private var extraFillName = "Fill 2"
     @State private var extraFillProduct = "XLS"
     @State private var extraFillPlanned = 0
+
+    /// Edit an existing untouched visit (remaining plan only).
+    @State private var editVisitIndex: Int? = nil
+    @State private var editCustomer = ""
+    @State private var editSite = ""
+
+    /// Edit an existing uncompleted fill.
+    @State private var editFillVisitIndex: Int? = nil
+    @State private var editFillIndex: Int? = nil
+    @State private var editFillName = ""
+    @State private var editFillProduct = "XLS"
+    @State private var editFillPlanned = 0
 
     public init(store: Chunk5FPrototypeStore, subdued: Bool = false) {
         self.store = store; self.subdued = subdued
@@ -34,82 +47,25 @@ public struct Chunk5FRunView: View {
 
             if store.canMutateRemainingPlan {
                 HStack(spacing: 8) {
-                    Button("ADD SITE") { showAddEditor = true }
-                        .buttonStyle(.bordered)
+                    Button("ADD SITE") {
+                        showAddEditor = true
+                        editVisitIndex = nil
+                        addFillVisitIndex = nil
+                        editFillVisitIndex = nil
+                    }
+                    .buttonStyle(.bordered)
                     Button("ADD TERMINAL") { store.addTerminalLoad() }
                         .buttonStyle(.bordered)
                 }
                 .font(.caption)
 
-                if showAddEditor {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("New site (edit before insert)").font(.caption.bold())
-                        TextField("Customer", text: $draftCustomer).textFieldStyle(.roundedBorder)
-                        TextField("Site", text: $draftSite).textFieldStyle(.roundedBorder)
-                        TextField("Fill name", text: $draftFillName).textFieldStyle(.roundedBorder)
-                        HStack {
-                            Picker("Product", selection: $draftProduct) {
-                                ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
-                            }
-                            TextField("Planned L", value: $draftPlanned, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.numberPad)
-                                .frame(width: 100)
-                        }
-                        HStack {
-                            Button("CANCEL") { showAddEditor = false }
-                            Spacer()
-                            Button("INSERT INTO RUN") {
-                                store.addSiteVisit(
-                                    customer: draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    site: draftSite.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    fillName: draftFillName.isEmpty ? "Fill 1" : draftFillName,
-                                    product: draftProduct,
-                                    plannedLitres: max(0, draftPlanned)
-                                )
-                                draftCustomer = ""; draftSite = ""; draftFillName = "Fill 1"
-                                draftProduct = "XLS"; draftPlanned = 0
-                                showAddEditor = false
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                      || draftSite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                    }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-                }
-
-                if let fi = addFillVisitIndex, store.visits.indices.contains(fi) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Add fill to \(store.visits[fi].customer) — \(store.visits[fi].site)")
-                            .font(.caption.bold())
-                        TextField("Fill name", text: $extraFillName).textFieldStyle(.roundedBorder)
-                        HStack {
-                            Picker("Product", selection: $extraFillProduct) {
-                                ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
-                            }
-                            TextField("Planned L", value: $extraFillPlanned, format: .number)
-                                .textFieldStyle(.roundedBorder).keyboardType(.numberPad).frame(width: 100)
-                        }
-                        HStack {
-                            Button("CANCEL") { addFillVisitIndex = nil }
-                            Spacer()
-                            Button("INSERT FILL") {
-                                store.addFill(
-                                    toVisitIndex: fi,
-                                    name: extraFillName.isEmpty ? "Extra Fill" : extraFillName,
-                                    product: extraFillProduct,
-                                    plannedLitres: max(0, extraFillPlanned)
-                                )
-                                extraFillName = "Fill 2"; extraFillProduct = "XLS"; extraFillPlanned = 0
-                                addFillVisitIndex = nil
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                if showAddEditor { addSiteEditor }
+                if let fi = addFillVisitIndex, store.visits.indices.contains(fi) { addFillEditor(visitIndex: fi) }
+                if let vi = editVisitIndex, store.visits.indices.contains(vi) { editVisitEditor(visitIndex: vi) }
+                if let vi = editFillVisitIndex, let fi = editFillIndex,
+                   store.visits.indices.contains(vi),
+                   store.visits[vi].fills.indices.contains(fi) {
+                    editFillEditor(visitIndex: vi, fillIndex: fi)
                 }
             }
 
@@ -123,6 +79,17 @@ public struct Chunk5FRunView: View {
                             Spacer()
                             Text(visit.requestedTime ?? visit.projectedTime)
                             if store.canMutateRemainingPlan && !visit.isComplete && !visit.fills.contains(where: { $0.completed }) {
+                                Button {
+                                    editVisitIndex = index
+                                    editCustomer = visit.customer
+                                    editSite = visit.site
+                                    showAddEditor = false
+                                    addFillVisitIndex = nil
+                                    editFillVisitIndex = nil
+                                } label: {
+                                    Image(systemName: "pencil").font(.caption)
+                                }
+                                .buttonStyle(.plain)
                                 Button(role: .destructive) {
                                     store.removeVisit(at: index)
                                 } label: {
@@ -139,20 +106,40 @@ public struct Chunk5FRunView: View {
                                     Text("  \(fill.completed ? "✓" : "•") \(fill.name)  \(fill.plannedLitres.formatted()) L \(fill.product)")
                                         .font(.caption2)
                                     Spacer()
-                                    if store.canMutateRemainingPlan && !fill.completed && visit.fills.count > 1 {
-                                        Button(role: .destructive) {
-                                            store.removeFill(visitIndex: index, fillIndex: fillIndex)
+                                    if store.canMutateRemainingPlan && !fill.completed {
+                                        Button {
+                                            editFillVisitIndex = index
+                                            editFillIndex = fillIndex
+                                            editFillName = fill.name
+                                            editFillProduct = fill.product
+                                            editFillPlanned = fill.plannedLitres
+                                            showAddEditor = false
+                                            addFillVisitIndex = nil
+                                            editVisitIndex = nil
                                         } label: {
-                                            Image(systemName: "minus.circle").font(.caption2)
+                                            Image(systemName: "pencil").font(.caption2)
                                         }
                                         .buttonStyle(.plain)
+                                        if visit.fills.count > 1 {
+                                            Button(role: .destructive) {
+                                                store.removeFill(visitIndex: index, fillIndex: fillIndex)
+                                            } label: {
+                                                Image(systemName: "minus.circle").font(.caption2)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
                                     }
                                 }
                             }
                             if store.canMutateRemainingPlan && !visit.isComplete {
-                                Button("ADD FILL") { addFillVisitIndex = index }
-                                    .font(.caption2)
-                                    .buttonStyle(.bordered)
+                                Button("ADD FILL") {
+                                    addFillVisitIndex = index
+                                    showAddEditor = false
+                                    editVisitIndex = nil
+                                    editFillVisitIndex = nil
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.bordered)
                             }
                         }
                     }
@@ -178,5 +165,135 @@ public struct Chunk5FRunView: View {
             .environment(\.editMode, .constant(store.canReorderRun && (store.workspace == .active || store.workspace == .preShift) ? .active : .inactive))
         }
         .opacity(subdued ? 0.48 : 1)
+    }
+
+    // MARK: - Editors
+
+    private var addSiteEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("New site (edit before insert)").font(.caption.bold())
+            TextField("Customer", text: $draftCustomer).textFieldStyle(.roundedBorder)
+            TextField("Site", text: $draftSite).textFieldStyle(.roundedBorder)
+            TextField("Fill name", text: $draftFillName).textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Product", selection: $draftProduct) {
+                    ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Planned L", value: $draftPlanned, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                    .frame(width: 100)
+            }
+            HStack {
+                Button("CANCEL") { showAddEditor = false }
+                Spacer()
+                Button("INSERT INTO RUN") {
+                    store.addSiteVisit(
+                        customer: draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines),
+                        site: draftSite.trimmingCharacters(in: .whitespacesAndNewlines),
+                        fillName: draftFillName.isEmpty ? "Fill 1" : draftFillName,
+                        product: draftProduct,
+                        plannedLitres: max(0, draftPlanned)
+                    )
+                    draftCustomer = ""; draftSite = ""; draftFillName = "Fill 1"
+                    draftProduct = "XLS"; draftPlanned = 0
+                    showAddEditor = false
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(draftCustomer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || draftSite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func addFillEditor(visitIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Add fill to \(store.visits[visitIndex].customer) — \(store.visits[visitIndex].site)")
+                .font(.caption.bold())
+            TextField("Fill name", text: $extraFillName).textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Product", selection: $extraFillProduct) {
+                    ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Planned L", value: $extraFillPlanned, format: .number)
+                    .textFieldStyle(.roundedBorder).keyboardType(.numberPad).frame(width: 100)
+            }
+            HStack {
+                Button("CANCEL") { addFillVisitIndex = nil }
+                Spacer()
+                Button("INSERT FILL") {
+                    store.addFill(
+                        toVisitIndex: visitIndex,
+                        name: extraFillName.isEmpty ? "Extra Fill" : extraFillName,
+                        product: extraFillProduct,
+                        plannedLitres: max(0, extraFillPlanned)
+                    )
+                    extraFillName = "Fill 2"; extraFillProduct = "XLS"; extraFillPlanned = 0
+                    addFillVisitIndex = nil
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func editVisitEditor(visitIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Edit planned site (remaining only)").font(.caption.bold())
+            TextField("Customer", text: $editCustomer).textFieldStyle(.roundedBorder)
+            TextField("Site", text: $editSite).textFieldStyle(.roundedBorder)
+            HStack {
+                Button("CANCEL") { editVisitIndex = nil }
+                Spacer()
+                Button("SAVE SITE") {
+                    store.updateVisit(
+                        at: visitIndex,
+                        customer: editCustomer.trimmingCharacters(in: .whitespacesAndNewlines),
+                        site: editSite.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                    editVisitIndex = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(editCustomer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || editSite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func editFillEditor(visitIndex: Int, fillIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Edit planned fill (uncompleted only)").font(.caption.bold())
+            TextField("Fill name", text: $editFillName).textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Product", selection: $editFillProduct) {
+                    ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Planned L", value: $editFillPlanned, format: .number)
+                    .textFieldStyle(.roundedBorder).keyboardType(.numberPad).frame(width: 100)
+            }
+            HStack {
+                Button("CANCEL") { editFillVisitIndex = nil; editFillIndex = nil }
+                Spacer()
+                Button("SAVE FILL") {
+                    store.updateFill(
+                        visitIndex: visitIndex,
+                        fillIndex: fillIndex,
+                        name: editFillName.isEmpty ? "Fill" : editFillName,
+                        product: editFillProduct,
+                        plannedLitres: max(0, editFillPlanned)
+                    )
+                    editFillVisitIndex = nil
+                    editFillIndex = nil
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
     }
 }
