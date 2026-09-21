@@ -338,12 +338,75 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func snapDelivery(compartment index: Int, proposed: Int) -> Int { guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
 
     // MARK: - Cargo commits
-    // NOTE: these remain ledger-backed until the reconciled transaction boundary is replaced in the next repair commit.
 
-    public func commitLoad() { message = "Cargo commit boundary under repair — Load not committed." }
-    public func commitDelivery() { message = "Cargo commit boundary under repair — Delivery not committed." }
-    public func commitTransfer(from: Int, to: Int, litres: Int) { message = "Cargo commit boundary under repair — Transfer not committed." }
-    public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) { message = "Cargo commit boundary under repair — Correction not committed." }
+    public func commitLoad() {
+        let before = confirmedLitres
+        let now = Date()
+        var candidate = cargoLedger
+        var added = 0
+        do {
+            for i in compartments.indices where draftLitres[i] > before[i] {
+                let delta = draftLitres[i] - before[i]
+                try candidate.append(CargoTransaction(kind: .load, cargo: cargo(for: compartments[i].product), units: Double(delta), destinationCompartmentID: compartments[i].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: "chunk5g.load"), reconciliationLog: reconciliationLog)
+                added += delta
+            }
+            guard added > 0 else { message = "Load not committed: no added cargo."; return }
+            cargoLedger = candidate
+            if let vi = loadVisitIndex, visits.indices.contains(vi) {
+                for fi in visits[vi].fills.indices { visits[vi].fills[fi].completed = true }
+            }
+            appendEvent(.load, "Load confirmed", "\(added) L")
+            resetDraft(); loadVisitIndex = nil; workspace = .active
+            message = "Load committed: \(added) L."; persistLiveSnapshot()
+        } catch { message = "Load not committed: \(error)" }
+    }
+
+    public func commitDelivery() {
+        guard deliveryDraftIsValid, let fill = currentFill, visits.indices.contains(selectedVisit), visits[selectedVisit].fills.indices.contains(selectedFill) else { message = "Delivery not committed: invalid draft."; return }
+        let before = confirmedLitres
+        let now = Date()
+        var candidate = cargoLedger
+        var delivered = 0
+        do {
+            for i in compartments.indices where compartments[i].product == fill.product && draftLitres[i] < before[i] {
+                let delta = before[i] - draftLitres[i]
+                try candidate.append(CargoTransaction(kind: .unload, cargo: cargo(for: fill.product), units: Double(delta), sourceCompartmentID: compartments[i].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: "chunk5g.delivery"), reconciliationLog: reconciliationLog)
+                delivered += delta
+            }
+            guard delivered > 0 else { message = "Delivery not committed: zero movement."; return }
+            cargoLedger = candidate
+            let identity = "\(visits[selectedVisit].customer) — \(visits[selectedVisit].site) / \(fill.name)"
+            visits[selectedVisit].fills[selectedFill].completed = true
+            appendEvent(.delivery, "Delivery \(delivered) L", "\(identity); \(fill.product)")
+            resetDraft(); message = "Delivery committed: \(delivered) L."; persistLiveSnapshot()
+        } catch { message = "Delivery not committed: \(error)" }
+    }
+
+    public func commitTransfer(from: Int, to: Int, litres: Int) {
+        guard compartments.indices.contains(from), compartments.indices.contains(to), from != to, litres > 0 else { message = "Transfer not committed: invalid input."; return }
+        guard compartments[from].product == compartments[to].product else { message = "Transfer not committed: product mismatch."; return }
+        let now = Date()
+        var candidate = cargoLedger
+        do {
+            try candidate.append(CargoTransaction(kind: .transfer, cargo: cargo(for: compartments[from].product), units: Double(litres), sourceCompartmentID: compartments[from].cargoCompartmentID, destinationCompartmentID: compartments[to].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: "chunk5g.transfer"), reconciliationLog: reconciliationLog)
+            cargoLedger = candidate
+            appendEvent(.transfer, "Transfer \(litres) L", "C\(from + 1) → C\(to + 1); \(compartments[from].product)")
+            resetDraft(); message = "Transfer committed."; persistLiveSnapshot()
+        } catch { message = "Transfer not committed: \(error)" }
+    }
+
+    public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
+        guard compartments.indices.contains(index), deltaLitres != 0 else { message = "Correction not committed: invalid input."; return }
+        guard let target = cargoLedger.transactions.last(where: { $0.sourceCompartmentID == compartments[index].cargoCompartmentID || $0.destinationCompartmentID == compartments[index].cargoCompartmentID }) else { message = "Correction not committed: no transaction to correct."; return }
+        let now = Date()
+        var candidate = cargoLedger
+        do {
+            try candidate.append(CargoTransaction(kind: .correction, cargo: target.cargo, units: target.units, sourceCompartmentID: target.destinationCompartmentID, destinationCompartmentID: target.sourceCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, correctsTransactionID: target.id, note: note), reconciliationLog: reconciliationLog)
+            cargoLedger = candidate
+            appendEvent(.correction, "Cargo transaction corrected", note)
+            resetDraft(); message = "Correction committed."; persistLiveSnapshot()
+        } catch { message = "Correction not committed: \(error)" }
+    }
 
     public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
         guard compartments.indices.contains(index) else { return }
@@ -376,6 +439,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func buildLiveGateReport() -> Chunk5GGateReport {
         let arithmeticOK = compartments.allSatisfy { (try? CargoStateReconciler.currentState(ledger: cargoLedger, reconciliationLog: reconciliationLog, compartmentID: $0.cargoCompartmentID)) != nil }
-        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: false, deliveriesRepresented: false, transfersRepresented: false, reconciliationsRepresented: eventLog.filter { $0.kind == .reconciliation }.count == reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0), persistenceOK: persistenceOK)
+        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: eventLog.filter { $0.kind == .load }.count == cargoLedger.transactions.filter { $0.kind == .load && $0.note == "chunk5g.load" }.count, deliveriesRepresented: eventLog.filter { $0.kind == .delivery }.count == cargoLedger.transactions.filter { $0.kind == .unload && $0.note == "chunk5g.delivery" }.count, transfersRepresented: eventLog.filter { $0.kind == .transfer }.count == cargoLedger.transactions.filter { $0.kind == .transfer && $0.note == "chunk5g.transfer" }.count, reconciliationsRepresented: eventLog.filter { $0.kind == .reconciliation }.count == reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0), persistenceOK: persistenceOK)
     }
 }
