@@ -30,7 +30,8 @@ public struct Chunk5GGateReportView: View {
                     check("Loads represented", report.loadsRepresented)
                     check("Deliveries represented", report.deliveriesRepresented)
                     check("Transfers represented", report.transfersRepresented)
-                    check("Reconciliations represented", report.reconciliationsRepresented)\n                    row("Completed planned deliveries", "\(report.completedPlannedDeliveries) / \(report.plannedDeliveries)")
+                    check("Reconciliations represented", report.reconciliationsRepresented)
+                    row("Completed planned deliveries", "\(report.completedPlannedDeliveries) / \(report.plannedDeliveries)")
                     status("Persistence/replay", report.persistenceStatus)
                 }
                 Section("CHRONOLOGICAL EVENTS") {
