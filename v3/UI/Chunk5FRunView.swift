@@ -10,6 +10,10 @@ public struct Chunk5FRunView: View {
     @State private var draftProduct = "XLS"
     @State private var draftPlanned = 0
     @State private var showAddEditor = false
+    @State private var addFillVisitIndex: Int? = nil
+    @State private var extraFillName = "Fill 2"
+    @State private var extraFillProduct = "XLS"
+    @State private var extraFillPlanned = 0
 
     public init(store: Chunk5FPrototypeStore, subdued: Bool = false) {
         self.store = store; self.subdued = subdued
@@ -75,6 +79,38 @@ public struct Chunk5FRunView: View {
                     .padding(8)
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
                 }
+
+                if let fi = addFillVisitIndex, store.visits.indices.contains(fi) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Add fill to \(store.visits[fi].customer) — \(store.visits[fi].site)")
+                            .font(.caption.bold())
+                        TextField("Fill name", text: $extraFillName).textFieldStyle(.roundedBorder)
+                        HStack {
+                            Picker("Product", selection: $extraFillProduct) {
+                                ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                            }
+                            TextField("Planned L", value: $extraFillPlanned, format: .number)
+                                .textFieldStyle(.roundedBorder).keyboardType(.numberPad).frame(width: 100)
+                        }
+                        HStack {
+                            Button("CANCEL") { addFillVisitIndex = nil }
+                            Spacer()
+                            Button("INSERT FILL") {
+                                store.addFill(
+                                    toVisitIndex: fi,
+                                    name: extraFillName.isEmpty ? "Extra Fill" : extraFillName,
+                                    product: extraFillProduct,
+                                    plannedLitres: max(0, extraFillPlanned)
+                                )
+                                extraFillName = "Fill 2"; extraFillProduct = "XLS"; extraFillPlanned = 0
+                                addFillVisitIndex = nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                }
             }
 
             List {
@@ -113,17 +149,21 @@ public struct Chunk5FRunView: View {
                                     }
                                 }
                             }
+                            if store.canMutateRemainingPlan && !visit.isComplete {
+                                Button("ADD FILL") { addFillVisitIndex = index }
+                                    .font(.caption2)
+                                    .buttonStyle(.bordered)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        // Only open operational workspace from Active when stationary — not from pre-shift planning.
                         guard store.workspace == .active,
                               store.canOpenOperationalWorkspace,
                               !visit.isComplete else { return }
                         if visit.isTerminalLoad {
-                            store.openLoad()
+                            store.openLoad(visitIndex: index)
                         } else {
                             store.openSite(index)
                         }
