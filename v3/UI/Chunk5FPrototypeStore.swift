@@ -78,6 +78,7 @@ private struct Chunk5GLiveSnapshot: Codable {
     var selectedFill: Int
     var restMinutes: Int
     var loadVisitIndex: Int?
+    var workspace: Chunk5FWorkspaceState
     var authoritativeFingerprint: String
 }
 
@@ -114,11 +115,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private var ulpCargo: CargoKind
     private var draftBaseline: [Int] = []
     private var loadVisitIndex: Int? = nil
-    private var operationSequence: Int = 0
     private var persistedFingerprint: String? = nil
 
     public static let availableProducts = ["XLS", "ULP"]
-    private static let persistenceKey = "chunk5g.live.snapshot.v2"
+    private static let persistenceKey = "chunk5g.live.snapshot.v3"
 
     public convenience init() {
         self.init(evidenceSource: .live)
@@ -239,8 +239,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     private func nextOperationID(_ kind: String) -> String {
-        operationSequence += 1
-        return "chunk5g.\(kind).op.\(operationSequence)"
+        "chunk5g.\(kind).op.\(UUID().uuidString)"
     }
 
     private func persistPlanMutation() {
@@ -450,7 +449,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func persistLiveSnapshot() {
         guard evidenceSource == .live else { return }
         let fingerprint = authoritativeFingerprint()
-        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, authoritativeFingerprint: fingerprint)
+        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, workspace: workspace, authoritativeFingerprint: fingerprint)
         do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = fingerprint } catch { message = "Snapshot save failed: \(error)" }
     }
 
@@ -460,7 +459,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt
         openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot
         unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo
-        selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
+        selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex; workspace=s.workspace
         resetDraft()
         guard authoritativeFingerprint() == s.authoritativeFingerprint else { throw CocoaError(.coderReadCorrupt) }
         persistedFingerprint=s.authoritativeFingerprint
