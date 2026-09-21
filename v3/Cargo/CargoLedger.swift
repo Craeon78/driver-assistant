@@ -9,11 +9,12 @@ public enum CargoLedgerError: Error, Equatable {
 public struct CargoLedger: Codable, Sendable, Equatable {
     public let limits: [CargoCompartmentLimit]
     public private(set) var transactions: [CargoTransaction]
+    public private(set) var requiresReconciliationForReplay: Bool
 
     public init(limits: [CargoCompartmentLimit], transactions: [CargoTransaction] = []) throws {
         var seen = Set<CanonicalID>()
         for limit in limits { guard seen.insert(limit.compartmentID).inserted else { throw CargoLedgerError.duplicateCompartmentLimit } }
-        self.limits=limits; self.transactions=[]
+        self.limits=limits; self.transactions=[]; self.requiresReconciliationForReplay=false
         for t in transactions.sorted(by: Self.order) { try append(t) }
     }
     private enum CodingKeys: String, CodingKey { case limits, transactions, requiresReconciliationForReplay }
@@ -48,7 +49,28 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         var candidate=transactions; candidate.append(t); _=try Self.project(limits:limits,transactions:candidate)
         transactions.append(t); transactions.sort(by:Self.order)
     }
+
+    public mutating func append(_ t: CargoTransaction, reconciliationLog: CargoReconciliationLog) throws {
+        if reconciliationLog.events.isEmpty { try append(t); return }
+        guard t.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
+        guard !transactions.contains(where:{$0.id==t.id}) else { throw CargoLedgerError.duplicateTransactionID }
+        try validateShape(t)
+        if t.kind == .correction { try validateCorrection(t) }
+        let previousTransactions=transactions
+        let previousFlag=requiresReconciliationForReplay
+        transactions.append(t); transactions.sort(by:Self.order); requiresReconciliationForReplay=true
+        do {
+            for limit in limits {
+                _ = try CargoStateReconciler.currentState(ledger:self,reconciliationLog:reconciliationLog,compartmentID:limit.compartmentID)
+            }
+        } catch {
+            transactions=previousTransactions; requiresReconciliationForReplay=previousFlag
+            throw error
+        }
+    }
+
     public func state(compartmentID: CanonicalID) throws -> CargoCompartmentState {
+        guard !requiresReconciliationForReplay else { throw CargoLedgerError.reconciliationRequired }
         guard limits.contains(where:{$0.compartmentID==compartmentID}) else { throw CargoLedgerError.unknownDestinationCompartment }
         return CargoCompartmentState(compartmentID:compartmentID,quantity:try Self.project(limits:limits,transactions:transactions)[compartmentID])
     }
