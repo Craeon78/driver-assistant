@@ -286,6 +286,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         appendEvent(.cargoBaseline, "Opening cargo baseline accepted",
                     "ODO \(draftOpeningODO); " + confirmedLitres.map(String.init).joined(separator: ","))
         message = "Opening cargo baseline accepted (not a Load)."
+        persistLiveSnapshot()
     }
 
     // MARK: - Shift lifecycle
@@ -392,7 +393,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let identity = "\(visits[selectedVisit].customer) — \(visits[selectedVisit].site) / \(fill.name)"
             visits[selectedVisit].fills[selectedFill].completed = true
             appendEvent(.delivery, "Delivery \(delivered) L", "\(identity); \(fill.product)")
-            resetDraft(); message = "Delivery committed: \(delivered) L."; persistLiveSnapshot()
+            resetDraft()
+            _ = advanceToNextFillAtSite()
+            message = visits[selectedVisit].isComplete ? "Delivery committed: \(delivered) L. Site visit complete." : "Delivery committed: \(delivered) L. Next fill ready."
+            persistLiveSnapshot()
         } catch { message = "Delivery not committed: \(error)" }
     }
 
@@ -425,7 +429,11 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
         guard compartments.indices.contains(index) else { return }
-        let calc = Double(confirmedLitres[index]); let obs = Double(max(0, observedLitres)); let now = Date()
+        guard observedLitres >= 0, observedLitres <= compartments[index].capacity else {
+            message = "Reconciliation not committed: observed litres must be 0...\(compartments[index].capacity)."
+            return
+        }
+        let calc = Double(confirmedLitres[index]); let obs = Double(observedLitres); let now = Date()
         do {
             try reconciliationLog.append(CargoReconciliationEvent(compartmentID: compartments[index].cargoCompartmentID, cargo: cargo(for: compartments[index].product), calculatedUnitsBefore: calc, confirmedPhysicalUnitsAfter: obs, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: note))
             if abs(obs - calc) > 0.5 { unresolvedDiscrepancies += 1 }
