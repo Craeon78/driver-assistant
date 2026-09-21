@@ -28,7 +28,7 @@ extension Chunk5FPrototypeStore {
             reconciliationsRepresented: true,
             cargoArithmeticOK: true,
             odoAnchorsOK: true,
-            persistenceOK: true
+            persistenceStatus: .pass
         )
     }
 
