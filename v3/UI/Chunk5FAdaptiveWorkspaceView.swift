@@ -21,18 +21,26 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            instrumentBar
-            Divider()
+            topBar
             Group {
                 switch store.workspace {
                 case .preShift: preShift
                 case .active: active
                 case .site: site
                 case .load: load
-                case .rest: rest
+                case .rest: active
                 }
             }
-            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if store.workspace == .active || store.workspace == .rest {
+                bottomBar
+            }
+            if !store.message.isEmpty && store.workspace != .preShift {
+                Text(store.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 6)
+            }
         }
         .sheet(isPresented: $store.showGateReport) {
             if let report = store.lastGateReport {
@@ -43,7 +51,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
         }
     }
 
-    private var instrumentBar: some View {
+    private var topBar: some View {
         HStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
             VStack { Text("\(store.prototypeSpeedKmh)").font(.title2.bold()); Text("km/h").font(.caption2) }
@@ -150,7 +158,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var active: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 14) {
             panel("NEXT SITE") {
                 if let next = store.nextIncompleteVisit {
                     Text(next.customer).font(.title2.bold())
@@ -176,29 +184,22 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             Chunk5FRunView(store: store).frame(width: 280)
         }
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 6) {
-                if !store.message.isEmpty {
-                    Text(store.message).font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button(store.prototypeSpeedKmh > 5 ? "SIMULATE STOP" : "SIMULATE DRIVING") {
-                        store.setPrototypeMoving(store.prototypeSpeedKmh <= 5)
-                    }
-                    Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }
-                        .disabled(store.prototypeSpeedKmh > 5)
-                    Button("TERMINAL / LOAD") { store.openLoad() }
-                        .disabled(store.prototypeSpeedKmh > 5)
-                    Button("START REST") { store.beginRest() }
-                    Button("RELAUNCH") { store.simulateRelaunch() }
-                    Button("END SHIFT") { store.endShift() }
-                        .buttonStyle(.borderedProminent)
-                }
-                .buttonStyle(.bordered)
-                .padding(8)
-                .background(.thinMaterial, in: Capsule())
-            }
+    }
+
+    private var bottomBar: some View {
+        HStack {
+            Button("SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh == 0) }
+            Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }
+                .disabled(store.prototypeSpeedKmh > 5)
+            Button("TERMINAL / LOAD") { store.openLoad() }
+                .disabled(store.prototypeSpeedKmh > 5)
+            Button("START REST") { store.beginRest() }
+            Button("RELAUNCH") { store.simulateRelaunch() }
+            Button("END SHIFT") { store.endShift() }
+                .buttonStyle(.borderedProminent)
         }
+        .buttonStyle(.bordered)
+        .padding()
     }
 
     private var site: some View {
@@ -215,9 +216,32 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text(store.currentVisit.map { "\($0.customer) — \($0.site)" } ?? "—").bold()
                     Text("Presence does not prove service.").font(.caption)
                 }
-                panel("CURRENT FILL") {
+                panel("CURRENT DROP") {
                     Text(store.currentFill?.name ?? "—").font(.title2)
                     Text("\(store.currentFill?.plannedLitres.formatted() ?? "0") L \(store.currentFill?.product ?? "") planned")
+                    if let visit = store.currentVisit, visit.fills.count > 1 {
+                        Divider()
+                        Text("Drops at this site").font(.caption.bold())
+                        ForEach(Array(visit.fills.enumerated()), id: \.element.id) { idx, f in
+                            HStack {
+                                Text(f.completed ? "✓" : (idx == store.selectedFill ? "→" : "○"))
+                                Text("\(f.name)  \(f.plannedLitres.formatted()) L \(f.product)")
+                                    .font(.caption)
+                                Spacer()
+                                if !f.completed && idx != store.selectedFill {
+                                    Button("GO") { store.selectFill(at: idx) }
+                                        .font(.caption2)
+                                        .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                        if visit.fills.contains(where: { $0.completed }),
+                           visit.fills.contains(where: { !$0.completed }) {
+                            Button("CONTINUE TO NEXT DROP") { store.advanceToNextFillAtSite() }
+                                .buttonStyle(.borderedProminent)
+                                .font(.caption)
+                        }
+                    }
                 }
             }
             HStack(alignment: .top, spacing: 16) {
@@ -279,9 +303,11 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
                 Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") { store.commitDelivery() }
-                    .buttonStyle(.borderedProminent).disabled(!store.deliveryDraftIsValid)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!store.deliveryDraftIsValid)
             }
         }
+        .padding()
     }
 
     private var load: some View {
@@ -293,39 +319,27 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Text("Leaving discards draft — no event committed")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            Text("PROPOSED TRUCK CARGO").font(.headline)
+            Text("LOAD — draft only until Confirm").font(.headline)
             Chunk5FTruckCargoView(store: store, mode: .load)
-            if !store.message.isEmpty { Text(store.message).font(.caption).foregroundStyle(.secondary) }
             HStack {
-                Button("SCAN BOL (SIMULATED)") { store.simulateBOLScan() }.buttonStyle(.bordered)
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
                 Button("CONFIRM LOAD") { store.commitLoad() }.buttonStyle(.borderedProminent)
             }
+            if !store.message.isEmpty {
+                Text(store.message).font(.caption).foregroundStyle(.secondary)
+            }
         }
-    }
-
-    private var rest: some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel("SHIFT SO FAR") {
-                Text("\(store.eventLog.filter { $0.kind == .delivery }.count) deliveries")
-                Text("Events: \(store.eventLog.count)")
-            }.frame(maxWidth: .infinity)
-            panel("FATIGUE") {
-                Text("\(store.restMinutes) / 30 min").font(.system(size: 42, weight: .bold))
-                Button("END REST") { store.endRest() }.buttonStyle(.borderedProminent)
-            }.frame(maxWidth: .infinity)
-            Chunk5FRunView(store: store, subdued: true).frame(maxWidth: .infinity)
-        }
+        .padding()
     }
 
     private func panel<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
+            Text(title).font(.caption.bold()).foregroundStyle(.secondary)
             content()
-            Spacer(minLength: 0)
         }
-        .padding(12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 }
