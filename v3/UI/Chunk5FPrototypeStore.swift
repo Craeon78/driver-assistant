@@ -156,16 +156,14 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             openingBaselineAccepted = true
             openingODO = 482315
             cargoOpeningSnapshot = draftLitres
-            // Seed fixture ledger via reconciliation baseline (not load).
             let now = Date()
             for (i, q) in draftLitres.enumerated() where q > 0 {
-                let before = 0.0
                 let after = Double(q)
                 reconciliationLog.append(CargoReconciliationEvent(
                     compartmentID: compartments[i].cargoCompartmentID,
-                    calculatedUnitsBefore: before,
+                    calculatedUnitsBefore: 0,
                     observedUnits: after,
-                    deltaUnits: after - before,
+                    deltaUnits: after,
                     reason: .physicalObservation,
                     note: "fixture.opening.baseline",
                     occurredAt: now,
@@ -175,15 +173,18 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
     }
 
-    // MARK: - Derived cargo
+    // MARK: - Chronological projection via shared reconciler
 
     public var confirmedLitres: [Int] {
         compartments.map { c in
-            (try? CargoStateReconciler.currentState(
+            if let reconciled = try? CargoStateReconciler.currentState(
                 ledger: cargoLedger,
                 reconciliationLog: reconciliationLog,
                 compartmentID: c.cargoCompartmentID
-            ).map { Int($0.units.rounded()) }) ?? 0
+            ), let q = reconciled.quantity {
+                return Int(q.units.rounded())
+            }
+            return 0
         }
     }
 
@@ -269,7 +270,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         message = "Shift started."
     }
 
-    /// Clears prior-shift report/end state so a second shift cannot merge days.
     private func beginNewShiftBoundary() {
         lastGateReport = nil
         showGateReport = false
@@ -490,7 +490,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             message = "Delivery not committed: \(error)"; return
         }
 
-        // Force full array write so @Published observers see fill completion.
+        // Force full array write so @Published observers see drop completion.
         var updatedVisits = visits
         guard updatedVisits.indices.contains(selectedVisit),
               updatedVisits[selectedVisit].fills.indices.contains(selectedFill) else { return }
@@ -514,7 +514,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         persistLiveSnapshot()
     }
 
-    /// Select an incomplete drop (fill) at the current site without leaving Site workspace.
+    /// Select an incomplete drop at the current site without leaving Site workspace.
     @discardableResult
     public func selectFill(at fillIndex: Int) -> Bool {
         guard workspace == .site,
@@ -752,13 +752,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func buildLiveGateReport() -> Chunk5GGateReport {
-        let kinds = Set(eventLog.map(\.kind))
-        let loadsOK = true
-        let deliveriesOK = true
-        let transfersOK = true
-        let reconcilesOK = true
-        _ = kinds
-
         let arithmeticOK: Bool = {
             do {
                 for c in compartments {
@@ -783,10 +776,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             cargoOpening: cargoOpeningSnapshot,
             cargoClosing: confirmedLitres,
             unresolvedDiscrepancies: unresolvedDiscrepancies,
-            loadsRepresented: loadsOK,
-            deliveriesRepresented: deliveriesOK,
-            transfersRepresented: transfersOK,
-            reconciliationsRepresented: reconcilesOK,
+            loadsRepresented: true,
+            deliveriesRepresented: true,
+            transfersRepresented: true,
+            reconciliationsRepresented: true,
             cargoArithmeticOK: arithmeticOK,
             odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0),
             persistenceOK: persistenceOK
