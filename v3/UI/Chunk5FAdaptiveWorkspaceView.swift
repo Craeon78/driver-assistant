@@ -3,13 +3,19 @@ import SwiftUI
 @MainActor
 public struct Chunk5FAdaptiveWorkspaceView: View {
     @StateObject private var store: Chunk5FPrototypeStore
+    @State private var transferFrom = 0
+    @State private var transferTo = 2
+    @State private var transferLitres = 0
+    @State private var reconcileIndex = 3
+    @State private var reconcileObserved = 0
+    @State private var correctionIndex = 0
+    @State private var correctionDelta = 0
 
     public init(store: Chunk5FPrototypeStore) {
         _store = StateObject(wrappedValue: store)
     }
 
     public init() {
-        // Live evidence source — no fixture authority on the field path.
         _store = StateObject(wrappedValue: Chunk5FPrototypeStore(evidenceSource: .live))
     }
 
@@ -45,19 +51,14 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Text("ODO \(store.openingODO.map { "\($0)" } ?? "—")")
                 Text(store.evidenceSource == .live ? "LIVE" : "FIXTURE").font(.caption)
             }
-            Image(systemName: "location.north.circle").font(.title2)
             Spacer()
             VStack {
-                Text(store.workspace == .rest ? "REST \(store.restMinutes) / 30m" : store.workspace == .preShift ? "READY TO START" : "NEXT REST 1h 42m")
+                Text(store.workspace == .rest ? "REST \(store.restMinutes) / 30m" : store.workspace == .preShift ? "READY TO START" : "IN SHIFT")
                     .font(.headline)
-                ProgressView(value: store.workspace == .rest ? Double(store.restMinutes) / 30.0 : 0.45)
             }.frame(maxWidth: 300)
             Spacer()
             VStack(alignment: .trailing) {
-                if store.workspace == .rest {
-                    Text("RESTING")
-                    Text("Recovery first").font(.caption)
-                } else if let next = store.nextIncompleteVisit {
+                if let next = store.nextIncompleteVisit {
                     Text("NEXT: \(next.customer)")
                     Text(next.site).font(.caption)
                 } else {
@@ -65,8 +66,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text(store.openingBaselineAccepted ? "Baseline OK" : "Baseline required").font(.caption)
                 }
             }
-            Image(systemName: "line.3.horizontal")
-            Image(systemName: "gearshape")
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
@@ -77,12 +76,30 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Text("DRIVER: MACOZZA").font(.title3.bold())
                 Text("Truck 92 • selected")
                 Divider()
+                Text("Opening ODO (driver-entered)").font(.headline)
+                TextField("Opening ODO", value: $store.draftOpeningODO, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                    .disabled(store.openingBaselineAccepted)
+                Divider()
                 Text("Opening cargo (vehicle assumption)").font(.headline)
                 Text("Confirm what is already aboard. This is not a Load.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(Array(store.compartments.enumerated()), id: \.element.id) { index, c in
                     HStack {
-                        Text("C\(c.id) \(c.product)")
+                        Text("C\(c.id)")
+                        if !store.openingBaselineAccepted {
+                            Picker("", selection: Binding(
+                                get: { store.compartments[index].product },
+                                set: { store.setProduct(compartment: index, product: $0) }
+                            )) {
+                                ForEach(Chunk5FPrototypeStore.availableProducts, id: \.self) { Text($0).tag($0) }
+                            }
+                            .labelsHidden()
+                            .frame(width: 80)
+                        } else {
+                            Text(c.product)
+                        }
                         Spacer()
                         TextField("L", value: Binding(
                             get: { store.draftLitres[index] },
@@ -91,12 +108,15 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
                         .keyboardType(.numberPad)
+                        .disabled(store.openingBaselineAccepted)
                     }
                     .font(.caption)
                 }
                 if store.openingBaselineAccepted {
                     Text("Baseline accepted: \(store.cargoOpeningSnapshot.map(String.init).joined(separator: ", "))")
                         .font(.caption2).foregroundStyle(.green)
+                    Text("Opening ODO \(store.openingODO.map(String.init) ?? "—")")
+                        .font(.caption2)
                 } else {
                     Button("CONFIRM OPENING BASELINE") {
                         store.acceptOpeningBaseline()
@@ -106,7 +126,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
 
             panel("TODAY") {
-                // START SHIFT — centre of middle column, prominent but not full-width banner
                 Button {
                     store.startShift()
                 } label: {
@@ -124,8 +143,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text(store.message).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("This month").font(.caption).foregroundStyle(.secondary)
-                Text("Litres delivered  •  km driven")
             }
 
             Chunk5FRunView(store: store).frame(maxWidth: .infinity)
@@ -138,25 +155,23 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 if let next = store.nextIncompleteVisit {
                     Text(next.customer).font(.title2.bold())
                     Text(next.site)
-                    if let requested = next.requestedTime {
-                        Text("\(requested) requested • ETA \(next.projectedTime)")
-                    } else {
-                        Text("ETA \(next.projectedTime)")
-                    }
-                    Text("\(next.plannedLitres.formatted()) L • \(next.fills.count) fill\(next.fills.count == 1 ? "" : "s")")
+                    Text("\(next.plannedLitres.formatted()) L")
                 } else {
                     Text(store.visits.isEmpty ? "NO SITES PLANNED" : "RUN COMPLETE").font(.title2.bold())
-                    Text("Add work from the Run panel when stationary.")
                 }
                 Text("Cargo: \(store.confirmedLitres.map(String.init).joined(separator: ", "))")
                     .font(.caption2).foregroundStyle(.secondary)
+                Divider()
+                Text("Closing ODO").font(.caption.bold())
+                TextField("Closing ODO", value: $store.draftClosingODO, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
             }.frame(width: 230)
             ZStack {
                 RoundedRectangle(cornerRadius: 14).fill(.quaternary)
                 VStack {
                     Image(systemName: "map").font(.system(size: 72))
-                    Text(store.nextIncompleteVisit.map { "MAP — current position → \($0.site)" } ?? "MAP — no next site")
-                    Text("Driving state: status, not analysis").font(.caption).foregroundStyle(.secondary)
+                    Text("MAP — status, not analysis").font(.caption)
                 }
             }
             Chunk5FRunView(store: store).frame(width: 280)
@@ -197,11 +212,10 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             HStack(spacing: 12) {
                 panel("SITE") {
-                    Text("Mini Map • Cleveland")
-                    Text("Site context only — presence does not prove service.")
+                    Text(store.currentVisit.map { "\($0.customer) — \($0.site)" } ?? "—").bold()
+                    Text("Presence does not prove service.").font(.caption)
                 }
                 panel("CURRENT FILL") {
-                    Text(store.currentVisit.map { "\($0.customer) — \($0.site)" } ?? "—").bold()
                     Text(store.currentFill?.name ?? "—").font(.title2)
                     Text("\(store.currentFill?.plannedLitres.formatted() ?? "0") L \(store.currentFill?.product ?? "") planned")
                 }
@@ -211,27 +225,55 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     Text("TRUCK — proposed remaining quantities").font(.headline)
                     Chunk5FTruckCargoView(store: store, mode: .site)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(store.currentFill?.name.uppercased() ?? "RECEIVING").font(.headline)
-                    RoundedRectangle(cornerRadius: 12).fill(.quaternary).frame(height: 150)
-                        .overlay(Text("VISUAL FILL ONLY\nNOT LEVEL EVIDENCE").multilineTextAlignment(.center))
-                    Text("+\(store.deliveryMovement.formatted()) L \(store.currentFill?.product ?? "")").font(.title2.bold())
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("+\(store.deliveryMovement.formatted()) L").font(.title2.bold())
                     Text("Planned \(store.plannedDelivery.formatted()) L")
-                    if store.deliveryDifference != 0 {
-                        Text("Difference \(store.deliveryDifference > 0 ? "+" : "")\(store.deliveryDifference) L")
-                    }
+
+                    Text("Transfer (editable)").font(.caption.bold())
                     HStack {
-                        Button("TRANSFER 200 C1→C3") {
-                            store.commitTransfer(from: 0, to: 2, litres: 200)
+                        Picker("From", selection: $transferFrom) {
+                            ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
                         }
-                        .buttonStyle(.bordered)
-                        Button("RECONCILE C4 EMPTY") {
-                            store.commitReconciliation(compartment: 3, observedLitres: 0, note: "Physical empty")
+                        Picker("To", selection: $transferTo) {
+                            ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
+                        }
+                        TextField("L", value: $transferLitres, format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 70).keyboardType(.numberPad)
+                        Button("CONFIRM TRANSFER") {
+                            store.commitTransfer(from: transferFrom, to: transferTo, litres: transferLitres)
                         }
                         .buttonStyle(.bordered)
                     }
                     .font(.caption)
-                }.frame(width: 260)
+
+                    Text("Reconcile (physical)").font(.caption.bold())
+                    HStack {
+                        Picker("C", selection: $reconcileIndex) {
+                            ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
+                        }
+                        TextField("Observed L", value: $reconcileObserved, format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 90).keyboardType(.numberPad)
+                        Button("CONFIRM RECONCILE") {
+                            store.commitReconciliation(compartment: reconcileIndex, observedLitres: reconcileObserved, note: "Physical observation")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.caption)
+
+                    Text("Correction (input error)").font(.caption.bold())
+                    HStack {
+                        Picker("C", selection: $correctionIndex) {
+                            ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
+                        }
+                        TextField("Delta L", value: $correctionDelta, format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 90).keyboardType(.numbersAndPunctuation)
+                        Button("CONFIRM CORRECTION") {
+                            store.commitCorrection(compartment: correctionIndex, deltaLitres: correctionDelta, note: "Driver correction")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.caption)
+                }.frame(width: 320)
             }
             HStack {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
@@ -251,25 +293,12 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Text("Leaving discards draft — no event committed")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            HStack(alignment: .top, spacing: 12) {
-                panel("TERMINAL") { Text("Mini Map"); Text("Safe stopped capture outside terminal") }
-                panel("DRIVER LOAD PLAN") {
-                    Text("Mini physical-sheet representation")
-                    Text("DA → driver → terminal process").font(.caption).foregroundStyle(.secondary)
-                }
-                panel("PAPERWORK") {
-                    Text("BOL likeness • EIP status")
-                    Text("DA representation — not official document").font(.caption)
-                }
-            }
             Text("PROPOSED TRUCK CARGO").font(.headline)
             Chunk5FTruckCargoView(store: store, mode: .load)
             if !store.message.isEmpty { Text(store.message).font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Button("SCAN BOL (SIMULATED)") { store.simulateBOLScan() }.buttonStyle(.bordered)
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
-                Spacer()
-                Text("SCAN + DRAG + TYPE = ONE LOAD DRAFT").font(.caption)
                 Spacer()
                 Button("CONFIRM LOAD") { store.commitLoad() }.buttonStyle(.borderedProminent)
             }
@@ -278,17 +307,12 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     private var rest: some View {
         HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 12) {
-                panel("MINI MAP") { Text("Current location"); Text("Work context available on request").font(.caption) }
-                panel("SHIFT SO FAR") {
-                    Text("\(store.eventLog.filter { $0.kind == .delivery }.count) deliveries logged")
-                    Text("Events: \(store.eventLog.count)")
-                }
+            panel("SHIFT SO FAR") {
+                Text("\(store.eventLog.filter { $0.kind == .delivery }.count) deliveries")
+                Text("Events: \(store.eventLog.count)")
             }.frame(maxWidth: .infinity)
             panel("FATIGUE") {
-                Text("CURRENT REST").font(.headline)
                 Text("\(store.restMinutes) / 30 min").font(.system(size: 42, weight: .bold))
-                ProgressView(value: Double(store.restMinutes), total: 30)
                 Button("END REST") { store.endRest() }.buttonStyle(.borderedProminent)
             }.frame(maxWidth: .infinity)
             Chunk5FRunView(store: store, subdued: true).frame(maxWidth: .infinity)
