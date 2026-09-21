@@ -78,6 +78,7 @@ private struct Chunk5GLiveSnapshot: Codable {
     var selectedFill: Int
     var restMinutes: Int
     var loadVisitIndex: Int?
+    var authoritativeFingerprint: String
 }
 
 @MainActor
@@ -121,6 +122,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public convenience init() {
         self.init(evidenceSource: .live)
+        restorePersistedLiveSnapshotOnLaunch()
     }
 
     public init(evidenceSource: Chunk5GEvidenceSource) {
@@ -339,8 +341,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     @discardableResult public func openSite(_ index: Int) -> Bool { guard canOpenOperationalWorkspace, visits.indices.contains(index), let nf = visits[index].fills.firstIndex(where: { !$0.completed }) else { return false }; selectedVisit = index; selectedFill = nf; loadVisitIndex = nil; resetDraft(); workspace = .site; return true }
     @discardableResult public func openNextIncompleteSite() -> Bool { guard let i = nextIncompleteVisitIndex else { return false }; return openSite(i) }
-    public func beginRest() { workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started") }
-    public func endRest() { workspace = .active; appendEvent(.workRest, "Rest ended") }
+    public func beginRest() { workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
+    public func endRest() { workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
     public func openLoad(visitIndex: Int? = nil) { guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
     public func resetDraft() { draftLitres = confirmedLitres; draftBaseline = draftLitres }
     public func undoDraft() { draftLitres = draftBaseline; message = "Draft reset" }
@@ -447,21 +449,48 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func persistLiveSnapshot() {
         guard evidenceSource == .live else { return }
-        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex)
-        do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = authoritativeFingerprint() } catch { message = "Snapshot save failed: \(error)" }
+        let fingerprint = authoritativeFingerprint()
+        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, authoritativeFingerprint: fingerprint)
+        do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = fingerprint } catch { message = "Snapshot save failed: \(error)" }
+    }
+
+    private func apply(snapshot s: Chunk5GLiveSnapshot) throws {
+        guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog
+        openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt
+        openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot
+        unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo
+        selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
+        resetDraft()
+        guard authoritativeFingerprint() == s.authoritativeFingerprint else { throw CocoaError(.coderReadCorrupt) }
+        persistedFingerprint=s.authoritativeFingerprint
+    }
+
+    private func restorePersistedLiveSnapshotOnLaunch() {
+        guard evidenceSource == .live, let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
+        do {
+            let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            try apply(snapshot:snapshot)
+            persistenceStatus = .pass
+            message = "Recovered persisted live shift."
+        } catch {
+            persistenceStatus = .fail
+            message = "Persisted shift recovery failed: \(error)"
+        }
     }
 
     public func simulateRelaunch() {
-        guard let data = UserDefaults.standard.data(forKey: Self.persistenceKey) else { message = "No snapshot to restore."; return }
+        guard let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { message="No snapshot to restore."; return }
         do {
-            let s = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
-            guard s.evidenceSource == .live else { message = "Fixture snapshot rejected."; return }
-            compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog; openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt; openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot; unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo; selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
-            resetDraft()
-            let restoredFingerprint = authoritativeFingerprint()
-            guard let expectedFingerprint, restoredFingerprint == expectedFingerprint else { persistenceStatus = .fail; message = "Relaunch restore mismatch."; return }
-            persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
-        } catch { persistenceStatus = .fail; message = "Relaunch restore failed: \(error)" }
+            let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            try apply(snapshot:snapshot)
+            persistenceStatus = .pass
+            appendEvent(.relaunch,"Relaunch restored authoritative snapshot")
+            message="Relaunch restored authoritative snapshot."
+        } catch {
+            persistenceStatus = .fail
+            message="Relaunch restore failed: \(error)"
+        }
     }
 
     public func buildLiveGateReport() -> Chunk5GGateReport {
