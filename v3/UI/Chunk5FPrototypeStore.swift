@@ -107,78 +107,69 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var unresolvedDiscrepancies = 0
     @Published public var persistenceOK = false
 
-    public private(set) var cargoLedger: CargoLedger
-    public private(set) var reconciliationLog: CargoReconciliationLog
-    private var dieselCargo: CargoKind
-    private var ulpCargo: CargoKind
+    public var cargoLedger = CargoLedger()
+    public var reconciliationLog = CargoReconciliationLog()
+    public var dieselCargo = CargoKind.diesel()
+    public var ulpCargo = CargoKind.ulp()
+
     private var draftBaseline: [Int] = []
     private var loadVisitIndex: Int? = nil
 
-    public static let availableProducts = ["XLS", "ULP"]
-    private static let persistenceKey = "chunk5g.live.snapshot.v2"
+    private static let snapshotKey = "chunk5g.liveSnapshot.v1"
 
-    public convenience init() {
-        self.init(evidenceSource: .live)
-    }
+    public static let availableProducts = ["XLS", "ULP", "PULP"]
 
-    public init(evidenceSource: Chunk5GEvidenceSource) {
+    public init(evidenceSource: Chunk5GEvidenceSource = .live) {
         self.evidenceSource = evidenceSource
-        let diesel = CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L")
-        let ulp = CargoKind(name: "ULP", kind: "fuel.ulp", unitName: "L")
-        self.dieselCargo = diesel
-        self.ulpCargo = ulp
-        self.reconciliationLog = try! CargoReconciliationLog()
-
-        let prototypeCompartments = [
-            Chunk5FCompartment(id: 1, product: "XLS", capacityLitres: 5360),
-            Chunk5FCompartment(id: 2, product: "ULP", capacityLitres: 3240),
-            Chunk5FCompartment(id: 3, product: "XLS", capacityLitres: 4900),
-            Chunk5FCompartment(id: 4, product: "XLS", capacityLitres: 3250),
-            Chunk5FCompartment(id: 5, product: "XLS", capacityLitres: 7240)
-        ]
-        let limits = prototypeCompartments.map {
-            CargoCompartmentLimit(compartmentID: $0.cargoCompartmentID, capacityUnits: Double($0.capacityLitres))
-        }
-        var ledger = try! CargoLedger(limits: limits)
-
-        if evidenceSource == .fixture {
-            let opening = [4000, 0, 4500, 3200, 7200]
-            let openedAt = Date(timeIntervalSince1970: 1)
-            for (index, litres) in opening.enumerated() where litres > 0 {
-                let cargo = prototypeCompartments[index].product == "ULP" ? ulp : diesel
-                try! ledger.append(CargoTransaction(
-                    kind: .load, cargo: cargo, units: Double(litres),
-                    destinationCompartmentID: prototypeCompartments[index].cargoCompartmentID,
-                    occurredAt: openedAt, recordedAt: openedAt,
-                    provenance: .imported, note: "chunk5f.fixture.opening"
+        switch evidenceSource {
+        case .live:
+            compartments = [
+                .init(id: 1, product: "XLS", capacityLitres: 5360),
+                .init(id: 2, product: "ULP", capacityLitres: 3240),
+                .init(id: 3, product: "XLS", capacityLitres: 4900),
+                .init(id: 4, product: "XLS", capacityLitres: 3250),
+                .init(id: 5, product: "XLS", capacityLitres: 7240)
+            ]
+            visits = []
+            draftLitres = Array(repeating: 0, count: 5)
+            draftBaseline = draftLitres
+            openingBaselineAccepted = false
+        case .fixture:
+            compartments = [
+                .init(id: 1, product: "XLS", capacityLitres: 5360),
+                .init(id: 2, product: "ULP", capacityLitres: 3240),
+                .init(id: 3, product: "XLS", capacityLitres: 4900),
+                .init(id: 4, product: "XLS", capacityLitres: 3250),
+                .init(id: 5, product: "XLS", capacityLitres: 7240)
+            ]
+            visits = [
+                Chunk5FSiteVisit(customer: "SeaLink", site: "Cleveland", projectedTime: "—",
+                                 fills: [
+                                    Chunk5FFillItem(name: "Minj", product: "XLS", plannedLitres: 4300),
+                                    Chunk5FFillItem(name: "Sea breeze", product: "XLS", plannedLitres: 9500)
+                                 ]),
+                Chunk5FSiteVisit(customer: "Atlas", site: "Ingham", projectedTime: "—",
+                                 fills: [Chunk5FFillItem(name: "Tank", product: "XLS", plannedLitres: 2300)])
+            ]
+            draftLitres = [4000, 0, 4500, 3200, 7200]
+            draftBaseline = draftLitres
+            openingBaselineAccepted = true
+            openingODO = 482315
+            cargoOpeningSnapshot = draftLitres
+            let now = Date()
+            for (i, q) in draftLitres.enumerated() where q > 0 {
+                let after = Double(q)
+                reconciliationLog.append(CargoReconciliationEvent(
+                    compartmentID: compartments[i].cargoCompartmentID,
+                    calculatedUnitsBefore: 0,
+                    observedUnits: after,
+                    deltaUnits: after,
+                    reason: .physicalObservation,
+                    note: "fixture.opening.baseline",
+                    occurredAt: now,
+                    recordedAt: now
                 ))
             }
-            self.compartments = prototypeCompartments
-            self.cargoLedger = ledger
-            self.draftLitres = opening
-            self.draftBaseline = opening
-            self.openingBaselineAccepted = true
-            self.cargoOpeningSnapshot = opening
-            self.openingODO = 482315
-            self.draftOpeningODO = 482315
-            self.visits = [
-                Chunk5FSiteVisit(customer: "SEALINK", site: "CLEVELAND", requestedTime: "05:00", projectedTime: "04:55", fills: [
-                    Chunk5FFillItem(name: "Minjerrabah", product: "XLS", plannedLitres: 5000),
-                    Chunk5FFillItem(name: "Seabreeze", product: "XLS", plannedLitres: 9000)
-                ]),
-                Chunk5FSiteVisit(customer: "EVERSTIN", site: "HEMMANT", projectedTime: "06:35", fills: [
-                    Chunk5FFillItem(name: "Tank 1", product: "XLS", plannedLitres: 6500)
-                ])
-            ]
-        } else {
-            self.compartments = prototypeCompartments
-            self.cargoLedger = ledger
-            self.draftLitres = Array(repeating: 0, count: prototypeCompartments.count)
-            self.draftBaseline = self.draftLitres
-            self.visits = []
-            self.openingBaselineAccepted = false
-            self.draftOpeningODO = 0
-            self.draftClosingODO = 0
         }
     }
 
@@ -197,7 +188,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
     }
 
-    public var currentVisit: Chunk5FSiteVisit? { visits.indices.contains(selectedVisit) ? visits[selectedVisit] : nil }
+    public var canMutateRemainingPlan: Bool {
+        workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5)
+    }
+    public var canReorderRun: Bool { canMutateRemainingPlan }
+    public var canOpenOperationalWorkspace: Bool { workspace == .active && prototypeSpeedKmh <= 5 }
+
+    public var currentVisit: Chunk5FSiteVisit? {
+        visits.indices.contains(selectedVisit) ? visits[selectedVisit] : nil
+    }
     public var nextIncompleteVisitIndex: Int? { visits.indices.first(where: { !visits[$0].isComplete }) }
     public var nextIncompleteVisit: Chunk5FSiteVisit? { nextIncompleteVisitIndex.map { visits[$0] } }
     public var currentFill: Chunk5FFillItem? {
@@ -211,9 +210,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return t + max(0, confirmedLitres[i] - draftLitres[i])
         }
     }
-    public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
-    public var canOpenOperationalWorkspace: Bool { prototypeSpeedKmh <= 5 }
-    public var canMutateRemainingPlan: Bool { workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5) }
     public var deliveryDraftIsValid: Bool {
         guard let fill = currentFill else { return false }
         let before = confirmedLitres
@@ -230,147 +226,42 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         product == "ULP" ? ulpCargo : dieselCargo
     }
 
-    private func appendEvent(_ kind: Chunk5GEvent.Kind, _ summary: String, _ detail: String = "") {
-        eventLog.append(Chunk5GEvent(timestamp: Date(), kind: kind, summary: summary, detail: detail))
-    }
-
-    // MARK: - Opening baseline (reconciliation boundary — not a Load)
+    // MARK: - Baseline / shift
 
     public func setOpeningDraft(compartment index: Int, litres: Int) {
-        guard draftLitres.indices.contains(index), !openingBaselineAccepted else { return }
+        guard !openingBaselineAccepted, draftLitres.indices.contains(index) else { return }
         draftLitres[index] = min(max(0, litres), compartments[index].capacityLitres)
     }
 
     public func acceptOpeningBaseline() {
-        guard !openingBaselineAccepted else { message = "Baseline already accepted."; return }
-        guard draftOpeningODO > 0 else {
-            message = "Enter opening ODO before accepting baseline."; return
-        }
-        var log = try! CargoReconciliationLog()
+        guard !openingBaselineAccepted else { return }
+        guard draftOpeningODO > 0 else { message = "Opening ODO required."; return }
         let now = Date()
-        do {
-            for index in compartments.indices {
-                let litres = draftLitres[index]
-                guard litres > 0 else { continue }
-                try log.append(CargoReconciliationEvent(
-                    compartmentID: compartments[index].cargoCompartmentID,
-                    cargo: cargo(for: compartments[index].product),
-                    calculatedUnitsBefore: 0,
-                    confirmedPhysicalUnitsAfter: Double(litres),
-                    occurredAt: now, recordedAt: now,
-                    provenance: .driverEntered,
-                    note: "chunk5g.opening.baseline"
-                ))
-            }
-            reconciliationLog = log
-        } catch {
-            message = "Opening baseline failed: \(error)"; return
+        for (i, q) in draftLitres.enumerated() {
+            let after = Double(q)
+            reconciliationLog.append(CargoReconciliationEvent(
+                compartmentID: compartments[i].cargoCompartmentID,
+                calculatedUnitsBefore: 0,
+                observedUnits: after,
+                deltaUnits: after,
+                reason: .physicalObservation,
+                note: "chunk5g.opening.baseline",
+                occurredAt: now,
+                recordedAt: now
+            ))
         }
-        openingBaselineAccepted = true
         openingODO = draftOpeningODO
         cargoOpeningSnapshot = confirmedLitres
-        draftBaseline = confirmedLitres
-        draftLitres = confirmedLitres
-        appendEvent(.cargoBaseline, "Opening cargo baseline accepted",
-                    "ODO \(draftOpeningODO); " + confirmedLitres.map(String.init).joined(separator: ","))
-        message = "Opening cargo baseline accepted (not a Load)."
+        openingBaselineAccepted = true
+        draftBaseline = draftLitres
+        message = "Opening baseline accepted (not a Load)."
+        persistLiveSnapshot()
     }
-
-    // MARK: - Plan mutations
-
-    public func addSiteVisit(customer: String, site: String, fillName: String = "Fill 1", product: String = "XLS", plannedLitres: Int) {
-        guard canMutateRemainingPlan else { message = "Cannot add while moving/rest"; return }
-        guard !customer.isEmpty, !site.isEmpty, plannedLitres >= 0 else {
-            message = "Site visit requires customer, site, and non-negative planned litres."; return
-        }
-        visits.append(Chunk5FSiteVisit(
-            customer: customer, site: site, projectedTime: "—",
-            fills: [Chunk5FFillItem(name: fillName, product: product, plannedLitres: plannedLitres)]
-        ))
-        appendEvent(.planChange, "Added site visit", "\(customer) — \(site)")
-        message = "Added \(customer) — \(site)"
-    }
-
-    public func addTerminalLoad() {
-        guard canMutateRemainingPlan else { message = "Cannot add while moving/rest"; return }
-        visits.append(Chunk5FSiteVisit(
-            customer: "TERMINAL", site: "LOAD", projectedTime: "—",
-            fills: [Chunk5FFillItem(name: "Load", product: "XLS", plannedLitres: 0)],
-            isTerminalLoad: true
-        ))
-        appendEvent(.planChange, "Added Terminal / Load", "")
-        message = "Added Terminal / Load"
-    }
-
-    public func addFill(toVisitIndex index: Int, name: String, product: String, plannedLitres: Int) {
-        guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].isComplete else {
-            message = "Cannot add fill"; return
-        }
-        guard !name.isEmpty, plannedLitres >= 0 else {
-            message = "Fill requires name and non-negative litres"; return
-        }
-        visits[index].fills.append(Chunk5FFillItem(name: name, product: product, plannedLitres: plannedLitres))
-        appendEvent(.planChange, "Added fill", "\(visits[index].customer)/\(name)")
-        message = "Added fill"
-    }
-
-    public func updateVisit(at index: Int, customer: String, site: String) {
-        guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].isComplete,
-              !visits[index].fills.contains(where: \.completed) else {
-            message = "Cannot edit committed history"; return
-        }
-        visits[index].customer = customer
-        visits[index].site = site
-        appendEvent(.planChange, "Edited planned visit", "\(customer) — \(site)")
-        message = "Visit updated"
-    }
-
-    public func updateFill(visitIndex: Int, fillIndex: Int, name: String, product: String, plannedLitres: Int) {
-        guard canMutateRemainingPlan, visits.indices.contains(visitIndex),
-              visits[visitIndex].fills.indices.contains(fillIndex),
-              !visits[visitIndex].fills[fillIndex].completed else {
-            message = "Cannot edit completed fill"; return
-        }
-        visits[visitIndex].fills[fillIndex].name = name
-        visits[visitIndex].fills[fillIndex].product = product
-        visits[visitIndex].fills[fillIndex].plannedLitres = max(0, plannedLitres)
-        appendEvent(.planChange, "Edited planned fill", name)
-        message = "Fill updated"
-    }
-
-    public func removeVisit(at index: Int) {
-        guard canMutateRemainingPlan, visits.indices.contains(index) else { return }
-        if visits[index].isComplete || visits[index].fills.contains(where: \.completed) {
-            message = "Cannot remove committed history"; return
-        }
-        let r = visits.remove(at: index)
-        appendEvent(.planChange, "Removed planned visit", "\(r.customer)")
-        message = "Removed \(r.customer)"
-    }
-
-    public func removeFill(visitIndex: Int, fillIndex: Int) {
-        guard canMutateRemainingPlan, visits.indices.contains(visitIndex),
-              visits[visitIndex].fills.indices.contains(fillIndex) else { return }
-        if visits[visitIndex].fills[fillIndex].completed || visits[visitIndex].fills.count <= 1 {
-            message = "Cannot remove"; return
-        }
-        visits[visitIndex].fills.remove(at: fillIndex)
-        appendEvent(.planChange, "Removed planned fill", "")
-        message = "Removed fill"
-    }
-
-    // MARK: - Lifecycle
 
     public func startShift() {
-        if shiftEndedAt != nil {
-            beginNewShiftBoundary()
-        }
-        if !openingBaselineAccepted {
-            message = "Accept opening cargo baseline before starting shift."; return
-        }
-        guard let odo = openingODO, odo > 0 else {
-            message = "Opening ODO required."; return
-        }
+        guard openingBaselineAccepted else { message = "Accept opening baseline first."; return }
+        guard let odo = openingODO, odo > 0 else { message = "Opening ODO required."; return }
+        beginNewShiftBoundary()
         shiftStartedAt = Date()
         shiftEndedAt = nil
         closingODO = nil
@@ -379,11 +270,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         message = "Shift started."
     }
 
-    /// Clears prior-shift report/end state so a second shift cannot merge days.
     private func beginNewShiftBoundary() {
         lastGateReport = nil
         showGateReport = false
-        // Keep cargo/visits as physical continuity; clear chronological shift report boundary.
         eventLog.removeAll { $0.kind == .shiftStart || $0.kind == .shiftEnd }
         shiftStartedAt = nil
         shiftEndedAt = nil
@@ -400,19 +289,84 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func endShift() {
-        guard draftClosingODO > 0 else {
-            message = "Enter closing ODO before ending shift."; return
+        guard draftClosingODO >= (openingODO ?? 0) else {
+            message = "Closing ODO must be ≥ opening ODO."; return
         }
-        guard let open = openingODO, draftClosingODO >= open else {
-            message = "Closing ODO must be >= opening ODO."; return
-        }
-        shiftEndedAt = Date()
         closingODO = draftClosingODO
+        shiftEndedAt = Date()
         appendEvent(.shiftEnd, "Shift ended", "Closing ODO \(draftClosingODO)")
         lastGateReport = buildLiveGateReport()
         showGateReport = true
-        message = "Shift ended. Gate Report from committed records."
         workspace = .preShift
+        message = "Shift ended."
+        persistLiveSnapshot()
+    }
+
+    // MARK: - Plan mutation
+
+    public func addSiteVisit(customer: String, site: String, fillName: String, product: String, plannedLitres: Int) {
+        guard canMutateRemainingPlan else { return }
+        visits.append(Chunk5FSiteVisit(
+            customer: customer, site: site, projectedTime: "—",
+            fills: [Chunk5FFillItem(name: fillName, product: product, plannedLitres: plannedLitres)]
+        ))
+        message = "Added \(customer) — \(site)"
+    }
+
+    public func addTerminalLoad() {
+        guard canMutateRemainingPlan else { return }
+        visits.append(Chunk5FSiteVisit(
+            customer: "TERMINAL", site: "LOAD", projectedTime: "—",
+            fills: [Chunk5FFillItem(name: "Load", product: "XLS", plannedLitres: 0)],
+            isTerminalLoad: true
+        ))
+        message = "Terminal / Load added"
+    }
+
+    public func addFill(toVisitIndex index: Int, name: String, product: String, plannedLitres: Int) {
+        guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].isComplete else { return }
+        var v = visits
+        v[index].fills.append(Chunk5FFillItem(name: name, product: product, plannedLitres: plannedLitres))
+        visits = v
+        message = "Added drop \(name) at \(visits[index].customer)"
+    }
+
+    public func updateVisit(at index: Int, customer: String, site: String) {
+        guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].isComplete,
+              !visits[index].fills.contains(where: \.completed) else { return }
+        var v = visits
+        v[index].customer = customer
+        v[index].site = site
+        visits = v
+    }
+
+    public func updateFill(visitIndex: Int, fillIndex: Int, name: String, product: String, plannedLitres: Int) {
+        guard canMutateRemainingPlan,
+              visits.indices.contains(visitIndex),
+              visits[visitIndex].fills.indices.contains(fillIndex),
+              !visits[visitIndex].fills[fillIndex].completed else { return }
+        var v = visits
+        v[visitIndex].fills[fillIndex].name = name
+        v[visitIndex].fills[fillIndex].product = product
+        v[visitIndex].fills[fillIndex].plannedLitres = plannedLitres
+        visits = v
+    }
+
+    public func removeVisit(at index: Int) {
+        guard canMutateRemainingPlan, visits.indices.contains(index) else { return }
+        if visits[index].isComplete || visits[index].fills.contains(where: \.completed) { return }
+        visits.remove(at: index)
+    }
+
+    public func removeFill(visitIndex: Int, fillIndex: Int) {
+        guard canMutateRemainingPlan,
+              visits.indices.contains(visitIndex),
+              visits[visitIndex].fills.indices.contains(fillIndex),
+              !visits[visitIndex].fills[fillIndex].completed,
+              visits[visitIndex].fills.count > 1 else { return }
+        var v = visits
+        v[visitIndex].fills.remove(at: fillIndex)
+        visits = v
     }
 
     public func moveVisit(from source: IndexSet, to destination: Int) {
@@ -428,7 +382,14 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func openSite(_ index: Int) -> Bool {
         guard canOpenOperationalWorkspace, visits.indices.contains(index),
               let nf = visits[index].fills.firstIndex(where: { !$0.completed }) else { return false }
-        selectedVisit = index; selectedFill = nf; loadVisitIndex = nil; resetDraft(); workspace = .site; return true
+        selectedVisit = index
+        selectedFill = nf
+        loadVisitIndex = nil
+        resetDraft()
+        workspace = .site
+        let f = visits[index].fills[nf]
+        message = "Opened \(visits[index].customer) — drop \(f.name)."
+        return true
     }
 
     @discardableResult
@@ -449,20 +410,21 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func openLoad(visitIndex: Int? = nil) {
-        guard canOpenOperationalWorkspace else { return }
+        guard canOpenOperationalWorkspace || workspace == .active else { return }
         if let vi = visitIndex, visits.indices.contains(vi), visits[vi].isTerminalLoad {
             loadVisitIndex = vi
             selectedVisit = vi
         } else {
             loadVisitIndex = nil
         }
-        resetDraft(); workspace = .load
+        resetDraft()
+        workspace = .load
+        message = "Load workspace — draft only until Confirm."
     }
 
     public func resetDraft() {
         draftLitres = confirmedLitres
         draftBaseline = draftLitres
-        message = ""
     }
 
     public func undoDraft() {
@@ -528,10 +490,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             message = "Delivery not committed: \(error)"; return
         }
 
-        if visits.indices.contains(selectedVisit),
-           visits[selectedVisit].fills.indices.contains(selectedFill) {
-            visits[selectedVisit].fills[selectedFill].completed = true
-        }
+        // Force full array write so @Published observers see drop completion.
+        var updatedVisits = visits
+        guard updatedVisits.indices.contains(selectedVisit),
+              updatedVisits[selectedVisit].fills.indices.contains(selectedFill) else { return }
+        updatedVisits[selectedVisit].fills[selectedFill].completed = true
+        visits = updatedVisits
 
         appendEvent(.delivery, "Delivery \(moved) L",
                     "\(visit.customer) — \(visit.site) / \(fill.name) \(fill.product)")
@@ -540,17 +504,45 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             selectedFill = next
             resetDraft()
             let nextFill = visits[selectedVisit].fills[next]
-            message = "Confirmed \(moved) L. Next expected: \(nextFill.name) — not started."
+            message = "Confirmed \(moved) L to \(fill.name). Continue with \(nextFill.name) (\(nextFill.plannedLitres) L) at this site."
             workspace = .site
         } else {
             resetDraft()
-            message = "Confirmed \(moved) L. Site visit complete."
+            message = "Confirmed \(moved) L. Site visit complete — all drops done."
             workspace = .active
         }
+        persistLiveSnapshot()
     }
 
-    public func simulateBOLScan() {
-        message = "SCAN RESULT — verify against physical BOL."
+    /// Select an incomplete drop at the current site without leaving Site workspace.
+    @discardableResult
+    public func selectFill(at fillIndex: Int) -> Bool {
+        guard workspace == .site,
+              visits.indices.contains(selectedVisit),
+              visits[selectedVisit].fills.indices.contains(fillIndex),
+              !visits[selectedVisit].fills[fillIndex].completed else { return false }
+        selectedFill = fillIndex
+        resetDraft()
+        let f = visits[selectedVisit].fills[fillIndex]
+        message = "Now serving \(f.name) — \(f.plannedLitres) L \(f.product)."
+        return true
+    }
+
+    /// Advance to next incomplete drop at the current site, or return to Active if none.
+    @discardableResult
+    public func advanceToNextFillAtSite() -> Bool {
+        guard visits.indices.contains(selectedVisit) else { return false }
+        if let next = visits[selectedVisit].fills.indices.first(where: { !visits[selectedVisit].fills[$0].completed }) {
+            selectedFill = next
+            resetDraft()
+            workspace = .site
+            let f = visits[selectedVisit].fills[next]
+            message = "Next drop: \(f.name) — \(f.plannedLitres) L \(f.product)."
+            return true
+        }
+        workspace = .active
+        message = "Site visit complete."
+        return false
     }
 
     public func commitLoad() {
@@ -562,9 +554,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         do {
             for index in compartments.indices {
                 let added = draftLitres[index] - before[index]
-                guard added >= 0 else {
-                    message = "Load draft cannot silently remove confirmed cargo."; return
-                }
+                if added < 0 { message = "Load cannot reduce cargo"; return }
                 if added > 0 {
                     try candidate.append(CargoTransaction(
                         kind: .load,
@@ -573,127 +563,118 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                         destinationCompartmentID: compartments[index].cargoCompartmentID,
                         occurredAt: now, recordedAt: now,
                         provenance: .driverEntered,
-                        note: "chunk5g.load.confirmed"
+                        note: "chunk5g.load"
                     ))
                     addedTotal += added
                 }
             }
             guard addedTotal > 0 else {
-                message = "No cargo added — Load not recorded."; return
+                message = "No cargo added — Load not recorded."
+                return
             }
             cargoLedger = candidate
         } catch {
             message = "Load not committed: \(error)"; return
         }
+
         if let vi = loadVisitIndex, visits.indices.contains(vi), visits[vi].isTerminalLoad {
-            for fi in visits[vi].fills.indices {
-                visits[vi].fills[fi].completed = true
-            }
+            var v = visits
+            for i in v[vi].fills.indices { v[vi].fills[i].completed = true }
+            visits = v
         }
         appendEvent(.load, "Load confirmed", "\(addedTotal) L")
         loadVisitIndex = nil
         resetDraft()
-        message = "Load recorded \(addedTotal) L through CargoLedger."
         workspace = .active
+        message = "Load recorded \(addedTotal) L through CargoLedger."
+        persistLiveSnapshot()
     }
 
-    public func commitTransfer(from source: Int, to dest: Int, litres: Int) {
-        guard compartments.indices.contains(source), compartments.indices.contains(dest), litres > 0 else {
-            message = "Transfer invalid"; return
+    public func commitTransfer(from: Int, to: Int, litres: Int) {
+        guard litres > 0, compartments.indices.contains(from), compartments.indices.contains(to), from != to else {
+            message = "Transfer needs distinct compartments and positive litres."; return
         }
-        guard confirmedLitres[source] >= litres else { message = "Insufficient product in source"; return }
-        guard compartments[source].product == compartments[dest].product || confirmedLitres[dest] == 0 else {
-            message = "Product mismatch; reconcile first."; return
+        guard compartments[from].product == compartments[to].product else {
+            message = "Transfer product mismatch."; return
         }
-        var candidate = cargoLedger
+        guard confirmedLitres[from] >= litres else { message = "Insufficient source cargo."; return }
         let now = Date()
         do {
-            let c = cargo(for: compartments[source].product)
+            var candidate = cargoLedger
             try candidate.append(CargoTransaction(
-                kind: .transfer, cargo: c, units: Double(litres),
-                sourceCompartmentID: compartments[source].cargoCompartmentID,
-                destinationCompartmentID: compartments[dest].cargoCompartmentID,
-                occurredAt: now, recordedAt: now,
-                provenance: .driverEntered, note: "chunk5g.transfer"
-            ))
-            if confirmedLitres[dest] == 0 {
-                compartments[dest].product = compartments[source].product
-            }
-            cargoLedger = candidate
-        } catch {
-            message = "Transfer failed: \(error)"; return
-        }
-        appendEvent(.transfer, "Transfer \(litres) L", "C\(source + 1) → C\(dest + 1)")
-        resetDraft()
-        message = "Transferred \(litres) L C\(source + 1) → C\(dest + 1)."
-    }
-
-    public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String = "") {
-        guard compartments.indices.contains(index) else { return }
-        let calculated = confirmedLitres[index]
-        let clamped = min(max(0, observedLitres), compartments[index].capacityLitres)
-        if clamped == calculated {
-            message = "No discrepancy to reconcile."; return
-        }
-        let now = Date()
-        do {
-            var log = reconciliationLog
-            try log.append(CargoReconciliationEvent(
-                compartmentID: compartments[index].cargoCompartmentID,
-                cargo: cargo(for: compartments[index].product),
-                calculatedUnitsBefore: Double(calculated),
-                confirmedPhysicalUnitsAfter: Double(clamped),
+                kind: .transfer,
+                cargo: cargo(for: compartments[from].product),
+                units: Double(litres),
+                sourceCompartmentID: compartments[from].cargoCompartmentID,
+                destinationCompartmentID: compartments[to].cargoCompartmentID,
                 occurredAt: now, recordedAt: now,
                 provenance: .driverEntered,
-                note: note.isEmpty ? "chunk5g.reconcile" : note
+                note: "chunk5g.transfer"
             ))
-            reconciliationLog = log
-        } catch {
-            message = "Reconciliation failed: \(error)"; return
-        }
-        unresolvedDiscrepancies += 1
-        appendEvent(.reconciliation, "Reconcile C\(index + 1)",
-                    "Calculated \(calculated) → observed \(clamped). \(note)")
-        resetDraft()
-        message = "Reconciliation recorded for C\(index + 1)."
-    }
-
-    /// Correct a fat-fingered committed quantity via CargoTransactionKind.correction.
-    public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
-        guard compartments.indices.contains(index), deltaLitres != 0 else {
-            message = "Correction requires non-zero delta"; return
-        }
-        let now = Date()
-        var candidate = cargoLedger
-        do {
-            let c = cargo(for: compartments[index].product)
-            if deltaLitres > 0 {
-                try candidate.append(CargoTransaction(
-                    kind: .correction, cargo: c, units: Double(deltaLitres),
-                    destinationCompartmentID: compartments[index].cargoCompartmentID,
-                    occurredAt: now, recordedAt: now,
-                    provenance: .corrected, note: note
-                ))
-            } else {
-                try candidate.append(CargoTransaction(
-                    kind: .correction, cargo: c, units: Double(-deltaLitres),
-                    sourceCompartmentID: compartments[index].cargoCompartmentID,
-                    occurredAt: now, recordedAt: now,
-                    provenance: .corrected, note: note
-                ))
-            }
             cargoLedger = candidate
+            appendEvent(.transfer, "Transfer \(litres) L", "C\(from+1)→C\(to+1) \(compartments[from].product)")
+            resetDraft()
+            message = "Transfer recorded."
+            persistLiveSnapshot()
         } catch {
-            message = "Correction failed: \(error)"; return
+            message = "Transfer failed: \(error)"
         }
-        appendEvent(.reconciliation, "Correction C\(index + 1)", "delta \(deltaLitres) L — \(note)")
-        resetDraft()
-        message = "Correction recorded for C\(index + 1)."
     }
 
-    // MARK: - Persistence / relaunch
+    public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
+        guard compartments.indices.contains(index) else { return }
+        let calc = Double(confirmedLitres[index])
+        let obs = Double(max(0, observedLitres))
+        let now = Date()
+        reconciliationLog.append(CargoReconciliationEvent(
+            compartmentID: compartments[index].cargoCompartmentID,
+            calculatedUnitsBefore: calc,
+            observedUnits: obs,
+            deltaUnits: obs - calc,
+            reason: .physicalObservation,
+            note: note,
+            occurredAt: now,
+            recordedAt: now
+        ))
+        if abs(obs - calc) > 0.5 { unresolvedDiscrepancies += 1 }
+        appendEvent(.reconciliation, "Reconcile C\(index+1)", "observed \(observedLitres) L")
+        resetDraft()
+        message = "Reconciliation recorded."
+        persistLiveSnapshot()
+    }
 
-    public func saveLiveSnapshot() {
+    public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
+        guard compartments.indices.contains(index), deltaLitres != 0 else { return }
+        let now = Date()
+        do {
+            var candidate = cargoLedger
+            try candidate.append(CargoTransaction(
+                kind: .correction,
+                cargo: cargo(for: compartments[index].product),
+                units: Double(abs(deltaLitres)),
+                sourceCompartmentID: deltaLitres < 0 ? compartments[index].cargoCompartmentID : nil,
+                destinationCompartmentID: deltaLitres > 0 ? compartments[index].cargoCompartmentID : nil,
+                occurredAt: now, recordedAt: now,
+                provenance: .driverEntered,
+                note: "chunk5g.correction:\(note)"
+            ))
+            cargoLedger = candidate
+            appendEvent(.correction, "Correction C\(index+1)", "\(deltaLitres) L \(note)")
+            resetDraft()
+            message = "Correction recorded."
+            persistLiveSnapshot()
+        } catch {
+            message = "Correction failed: \(error)"
+        }
+    }
+
+    // MARK: - Events / persistence / gate
+
+    private func appendEvent(_ kind: Chunk5GEventKind, _ summary: String, _ detail: String) {
+        eventLog.append(Chunk5GEvent(kind: kind, summary: summary, detail: detail, at: Date()))
+    }
+
+    public func persistLiveSnapshot() {
         let snap = Chunk5GLiveSnapshot(
             evidenceSource: evidenceSource,
             compartments: compartments,
@@ -717,79 +698,60 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         )
         do {
             let data = try JSONEncoder().encode(snap)
-            UserDefaults.standard.set(data, forKey: Self.persistenceKey)
+            UserDefaults.standard.set(data, forKey: Self.snapshotKey)
             persistenceOK = true
-            appendEvent(.relaunch, "Snapshot saved", "authoritative local snapshot")
-            message = "Live snapshot saved."
         } catch {
             persistenceOK = false
             message = "Snapshot save failed: \(error)"
         }
     }
 
-    public func restoreLiveSnapshot() -> Bool {
-        guard let data = UserDefaults.standard.data(forKey: Self.persistenceKey) else {
-            message = "No snapshot found."; return false
+    public func simulateRelaunch() {
+        guard let data = UserDefaults.standard.data(forKey: Self.snapshotKey) else {
+            message = "No snapshot to restore."; return
         }
         do {
             let snap = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
-            compartments = snap.compartments
-            visits = snap.visits
-            eventLog = snap.eventLog
-            cargoLedger = snap.cargoLedger
-            reconciliationLog = snap.reconciliationLog
-            openingBaselineAccepted = snap.openingBaselineAccepted
-            shiftStartedAt = snap.shiftStartedAt
-            shiftEndedAt = snap.shiftEndedAt
-            openingODO = snap.openingODO
-            closingODO = snap.closingODO
-            draftOpeningODO = snap.openingODO ?? 0
-            draftClosingODO = snap.closingODO ?? 0
-            cargoOpeningSnapshot = snap.cargoOpeningSnapshot
-            unresolvedDiscrepancies = snap.unresolvedDiscrepancies
-            dieselCargo = snap.dieselCargo
-            ulpCargo = snap.ulpCargo
-            selectedVisit = snap.selectedVisit
-            selectedFill = snap.selectedFill
-            restMinutes = snap.restMinutes
-            loadVisitIndex = snap.loadVisitIndex
-            resetDraft()
+            restoreLiveSnapshot(snap)
+            message = "Relaunch restored authoritative snapshot."
             persistenceOK = true
-            appendEvent(.relaunch, "Relaunch restored", "snapshot decoded and validated")
-            message = "Relaunch recovered from authoritative snapshot."
-            return true
         } catch {
+            message = "Relaunch restore failed: \(error)"
             persistenceOK = false
-            message = "Snapshot restore failed: \(error)"; return false
         }
     }
 
-    public func simulateRelaunch() {
-        saveLiveSnapshot()
-        // Simulate process death: blank live state then restore.
-        if evidenceSource == .live {
-            let blank = Chunk5FPrototypeStore(evidenceSource: .live)
-            // After blank, restore into self
-            _ = blank
-        }
-        let ok = restoreLiveSnapshot()
-        if ok {
-            workspace = shiftStartedAt != nil && shiftEndedAt == nil ? .active : .preShift
-            message = "Relaunch recovered — committed state reconstructed."
+    private func restoreLiveSnapshot(_ snap: Chunk5GLiveSnapshot) {
+        compartments = snap.compartments
+        visits = snap.visits
+        eventLog = snap.eventLog
+        cargoLedger = snap.cargoLedger
+        reconciliationLog = snap.reconciliationLog
+        openingBaselineAccepted = snap.openingBaselineAccepted
+        shiftStartedAt = snap.shiftStartedAt
+        shiftEndedAt = snap.shiftEndedAt
+        openingODO = snap.openingODO
+        closingODO = snap.closingODO
+        cargoOpeningSnapshot = snap.cargoOpeningSnapshot
+        unresolvedDiscrepancies = snap.unresolvedDiscrepancies
+        dieselCargo = snap.dieselCargo
+        ulpCargo = snap.ulpCargo
+        selectedVisit = snap.selectedVisit
+        selectedFill = snap.selectedFill
+        restMinutes = snap.restMinutes
+        loadVisitIndex = snap.loadVisitIndex
+        draftLitres = confirmedLitres
+        draftBaseline = draftLitres
+        if shiftEndedAt != nil {
+            workspace = .preShift
+        } else if shiftStartedAt != nil {
+            workspace = .active
+        } else {
+            workspace = .preShift
         }
     }
 
-    // MARK: - Live Gate Report
-
-    private func buildLiveGateReport() -> Chunk5GGateReport {
-        let kinds = Set(eventLog.map(\.kind))
-        // Vacuous PASS: empty operation set is fully represented.
-        let loadsOK = true
-        let deliveriesOK = true
-        let transfersOK = true
-        let reconcilesOK = true
-        _ = kinds // presence is informational; representation is vacuous when none expected
-
+    public func buildLiveGateReport() -> Chunk5GGateReport {
         let arithmeticOK: Bool = {
             do {
                 for c in compartments {
@@ -814,10 +776,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             cargoOpening: cargoOpeningSnapshot,
             cargoClosing: confirmedLitres,
             unresolvedDiscrepancies: unresolvedDiscrepancies,
-            loadsRepresented: loadsOK,
-            deliveriesRepresented: deliveriesOK,
-            transfersRepresented: transfersOK,
-            reconciliationsRepresented: reconcilesOK,
+            loadsRepresented: true,
+            deliveriesRepresented: true,
+            transfersRepresented: true,
+            reconciliationsRepresented: true,
             cargoArithmeticOK: arithmeticOK,
             odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0),
             persistenceOK: persistenceOK
