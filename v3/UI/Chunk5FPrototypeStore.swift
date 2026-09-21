@@ -108,6 +108,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var cargoOpeningSnapshot: [Int] = []
     @Published public var unresolvedDiscrepancies = 0
     @Published public var persistenceStatus: Chunk5GCheckStatus = .notTested
+    @Published public var completedShiftLocked = false
 
     public private(set) var cargoLedger: CargoLedger
     public private(set) var reconciliationLog: CargoReconciliationLog
@@ -293,6 +294,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     // MARK: - Shift lifecycle
 
     public func startShift() {
+        guard !completedShiftLocked else { message = "Previous shift is locked until its archive is valid."; return }
         guard openingBaselineAccepted else { message = "Accept opening baseline first."; return }
         guard let odo = openingODO, odo > 0 else { message = "Opening ODO required."; return }
         lastGateReport = nil; showGateReport = false; shiftEndedAt = nil; closingODO = nil; draftClosingODO = 0
@@ -312,22 +314,34 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard draftClosingODO >= (openingODO ?? 0) else { message = "Closing ODO must be ≥ opening ODO."; return }
         closingODO = draftClosingODO; shiftEndedAt = Date()
         appendEvent(.shiftEnd, "Shift ended", "Closing ODO \(draftClosingODO)")
-        lastGateReport = buildLiveGateReport(); showGateReport = true; workspace = .preShift
-        message = "Shift ended."; persistLiveSnapshot()
-        if evidenceSource == .live, let data = UserDefaults.standard.data(forKey: Self.persistenceKey) {
-            do {
-                let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
-                try archiveCompletedSnapshot(data, snapshot: snapshot)
-                UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
-                resetForNewShift()
-            } catch {
-                persistenceStatus = .fail
-                message = "Shift ended, but archive validation failed: \(error)"
-            }
+        completedShiftLocked = true
+        workspace = .preShift
+        message = "Finalising completed shift..."
+        persistLiveSnapshot()
+
+        guard evidenceSource == .live, let data = UserDefaults.standard.data(forKey: Self.persistenceKey) else {
+            persistenceStatus = .fail
+            lastGateReport = buildLiveGateReport(); showGateReport = true
+            message = "Shift ended, but no durable snapshot was available."
+            return
+        }
+        do {
+            let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            try archiveCompletedSnapshot(data, snapshot: snapshot)
+            persistenceStatus = .pass
+            lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+            showGateReport = true
+            UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
+            resetForNewShift(preservingCompletedReport: true)
+            message = "Shift ended and archived."
+        } catch {
+            persistenceStatus = .fail
+            lastGateReport = buildLiveGateReport(); showGateReport = true
+            message = "Shift ended, but archive validation failed. Previous shift is locked: \(error)"
         }
     }
 
-    private func resetForNewShift() {
+    private func resetForNewShift(preservingCompletedReport: Bool = false) {
         let limits = compartments.map {
             CargoCompartmentLimit(compartmentID: $0.cargoCompartmentID, capacityUnits: Double($0.capacityLitres))
         }
@@ -337,7 +351,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         shiftStartedAt = nil; shiftEndedAt = nil; openingODO = nil; closingODO = nil
         draftOpeningODO = 0; draftClosingODO = 0; cargoOpeningSnapshot = []
         unresolvedDiscrepancies = 0; selectedVisit = 0; selectedFill = 0; loadVisitIndex = nil
-        workspace = .preShift; persistedFingerprint = nil; persistenceStatus = .pass
+        workspace = .preShift; persistedFingerprint = nil; completedShiftLocked = false
+        if !preservingCompletedReport { persistenceStatus = .notTested }
         draftLitres = Array(repeating: 0, count: compartments.count); draftBaseline = draftLitres
     }
 
@@ -455,8 +470,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
         guard compartments.indices.contains(index) else { return }
-        guard observedLitres >= 0, observedLitres <= compartments[index].capacity else {
-            message = "Reconciliation not committed: observed litres must be 0...\(compartments[index].capacity)."
+        guard observedLitres >= 0, observedLitres <= compartments[index].capacityLitres else {
+            message = "Reconciliation not committed: observed litres must be 0...\(compartments[index].capacityLitres)."
             return
         }
         let calc = Double(confirmedLitres[index]); let obs = Double(observedLitres); let now = Date()
@@ -531,8 +546,46 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         UserDefaults.standard.set(data, forKey: Self.completedPersistenceKey)
     }
 
+    private func gateReport(fromValidated s: Chunk5GLiveSnapshot, persistenceStatus status: Chunk5GCheckStatus) throws -> Chunk5GGateReport {
+        try validate(snapshot: s)
+        let cargoClosing = try s.compartments.map { c -> Int in
+            let state = try CargoStateReconciler.currentState(ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartmentID: c.cargoCompartmentID)
+            return Int((state.quantity?.units ?? 0).rounded())
+        }
+        let arithmeticOK = s.compartments.allSatisfy { c in
+            (try? CargoStateReconciler.currentState(ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartmentID: c.cargoCompartmentID)) != nil
+        }
+        return Chunk5GGateReport(
+            shiftStart: s.shiftStartedAt, shiftEnd: s.shiftEndedAt, openingODO: s.openingODO, closingODO: s.closingODO,
+            events: s.eventLog, cargoOpening: s.cargoOpeningSnapshot, cargoClosing: cargoClosing,
+            unresolvedDiscrepancies: s.unresolvedDiscrepancies,
+            loadsRepresented: s.eventLog.filter { $0.kind == .load }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .load && ($0.note?.hasPrefix("chunk5g.load.op.") ?? false) }.compactMap(\.note)).count,
+            deliveriesRepresented: s.eventLog.filter { $0.kind == .delivery }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .unload && ($0.note?.hasPrefix("chunk5g.delivery.op.") ?? false) }.compactMap(\.note)).count,
+            transfersRepresented: s.eventLog.filter { $0.kind == .transfer }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .transfer && ($0.note?.hasPrefix("chunk5g.transfer.op.") ?? false) }.compactMap(\.note)).count,
+            reconciliationsRepresented: s.eventLog.filter { $0.kind == .reconciliation }.count + s.eventLog.filter { $0.kind == .correction }.count == s.reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count,
+            cargoArithmeticOK: arithmeticOK,
+            odoAnchorsOK: (s.openingODO ?? 0) > 0 && (s.closingODO ?? 0) >= (s.openingODO ?? 0),
+            persistenceStatus: status,
+            plannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count,
+            completedPlannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count
+        )
+    }
+
+    private func restoreArchivedGateReport() {
+        guard let data = UserDefaults.standard.data(forKey: Self.completedPersistenceKey) else { return }
+        do {
+            let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+        } catch {
+            persistenceStatus = .fail
+            message = "Previous completed shift archive failed validation: \(error)"
+        }
+    }
+
     private func restorePersistedLiveSnapshotOnLaunch() {
-        guard evidenceSource == .live, let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
+        guard evidenceSource == .live else { return }
+        restoreArchivedGateReport()
+        guard let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
         do {
             let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
             try validate(snapshot: snapshot)
@@ -540,6 +593,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 try archiveCompletedSnapshot(data, snapshot: snapshot)
                 UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
                 persistenceStatus = .pass
+                lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
                 message = "Previous shift validated and archived. Ready for a new shift."
                 return
             }
