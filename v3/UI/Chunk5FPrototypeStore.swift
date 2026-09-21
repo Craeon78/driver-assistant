@@ -112,7 +112,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private var dieselCargo: CargoKind
     private var ulpCargo: CargoKind
     private var draftBaseline: [Int] = []
-    private var loadVisitIndex: Int? = nil\n    private var operationSequence: Int = 0
+    private var loadVisitIndex: Int? = nil\n    private var operationSequence: Int = 0\n    private var persistedFingerprint: String? = nil
 
     public static let availableProducts = ["XLS", "ULP"]
     private static let persistenceKey = "chunk5g.live.snapshot.v2"
@@ -430,10 +430,20 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     // MARK: - Persistence / gate
 
+    private func authoritativeFingerprint() -> String {
+        let cargo = confirmedLitres.map(String.init).joined(separator: ",")
+        let run = visits.map { v in
+            let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
+            return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
+        }.joined(separator: "||")
+        let history = eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        return cargo + "##" + run + "##" + history
+    }
+
     public func persistLiveSnapshot() {
         guard evidenceSource == .live else { return }
         let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex)
-        do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey) } catch { message = "Snapshot save failed: \(error)" }
+        do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = authoritativeFingerprint() } catch { message = "Snapshot save failed: \(error)" }
     }
 
     public func simulateRelaunch() {
@@ -442,7 +452,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let s = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
             guard s.evidenceSource == .live else { message = "Fixture snapshot rejected."; return }
             compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog; openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt; openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot; unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo; selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
-            resetDraft(); persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
+            resetDraft()\n            let restoredFingerprint = authoritativeFingerprint()\n            guard let expectedFingerprint, restoredFingerprint == expectedFingerprint else { persistenceStatus = .fail; message = "Relaunch restore mismatch."; return }\n            persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
         } catch { persistenceStatus = .fail; message = "Relaunch restore failed: \(error)" }
     }
 
