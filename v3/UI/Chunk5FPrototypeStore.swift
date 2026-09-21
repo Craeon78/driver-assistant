@@ -112,7 +112,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private var dieselCargo: CargoKind
     private var ulpCargo: CargoKind
     private var draftBaseline: [Int] = []
-    private var loadVisitIndex: Int? = nil\n    private var operationSequence: Int = 0\n    private var persistedFingerprint: String? = nil
+    private var loadVisitIndex: Int? = nil
+    private var operationSequence: Int = 0
+    private var persistedFingerprint: String? = nil
 
     public static let availableProducts = ["XLS", "ULP"]
     private static let persistenceKey = "chunk5g.live.snapshot.v2"
@@ -452,7 +454,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let s = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
             guard s.evidenceSource == .live else { message = "Fixture snapshot rejected."; return }
             compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog; openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt; openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot; unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo; selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
-            resetDraft()\n            let restoredFingerprint = authoritativeFingerprint()\n            guard let expectedFingerprint, restoredFingerprint == expectedFingerprint else { persistenceStatus = .fail; message = "Relaunch restore mismatch."; return }\n            persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
+            resetDraft()
+            let restoredFingerprint = authoritativeFingerprint()
+            guard let expectedFingerprint, restoredFingerprint == expectedFingerprint else { persistenceStatus = .fail; message = "Relaunch restore mismatch."; return }
+            persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
         } catch { persistenceStatus = .fail; message = "Relaunch restore failed: \(error)" }
     }
 
