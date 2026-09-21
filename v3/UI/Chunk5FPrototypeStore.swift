@@ -9,6 +9,10 @@ public enum Chunk5GEvidenceSource: String, Codable, Sendable {
     case fixture
 }
 
+public enum Chunk5GShiftLifecycle: String, Codable, Sendable {
+    case fresh, active, completedLocked, recoveryLocked
+}
+
 public enum Chunk5FWorkspaceState: String, CaseIterable, Codable, Sendable {
     case preShift = "Pre-shift"
     case active = "Active"
@@ -108,7 +112,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var cargoOpeningSnapshot: [Int] = []
     @Published public var unresolvedDiscrepancies = 0
     @Published public var persistenceStatus: Chunk5GCheckStatus = .notTested
-    @Published public var completedShiftLocked = false
+    @Published public private(set) var shiftLifecycle: Chunk5GShiftLifecycle = .fresh
+    public var completedShiftLocked: Bool { shiftLifecycle == .completedLocked || shiftLifecycle == .recoveryLocked }
+    private var mutationAllowed: Bool { shiftLifecycle == .fresh || shiftLifecycle == .active }
 
     public private(set) var cargoLedger: CargoLedger
     public private(set) var reconciliationLog: CargoReconciliationLog
@@ -217,9 +223,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return t + max(0, confirmedLitres[i] - draftLitres[i])
         }
     }
-    public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
-    public var canOpenOperationalWorkspace: Bool { prototypeSpeedKmh <= 5 }
-    public var canMutateRemainingPlan: Bool { workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5) }
+    public var canReorderRun: Bool { mutationAllowed && prototypeSpeedKmh <= 5 }
+    public var canOpenOperationalWorkspace: Bool { mutationAllowed && prototypeSpeedKmh <= 5 }
+    public var canMutateRemainingPlan: Bool { mutationAllowed && (workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5)) }
     public var deliveryDraftIsValid: Bool {
         guard let fill = currentFill else { return false }
         let before = confirmedLitres
@@ -251,11 +257,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     // MARK: - Opening baseline (reconciliation boundary — not a Load)
 
     public func setOpeningDraft(compartment index: Int, litres: Int) {
-        guard draftLitres.indices.contains(index), !openingBaselineAccepted else { return }
+        guard mutationAllowed, draftLitres.indices.contains(index), !openingBaselineAccepted else { return }
         draftLitres[index] = min(max(0, litres), compartments[index].capacityLitres)
     }
 
     public func acceptOpeningBaseline() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard !openingBaselineAccepted else { message = "Baseline already accepted."; return }
         guard draftOpeningODO > 0 else {
             message = "Enter opening ODO before accepting baseline."; return
@@ -294,10 +301,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     // MARK: - Shift lifecycle
 
     public func startShift() {
+        guard mutationAllowed else { message = "Previous shift is locked until recovery succeeds."; return }
         guard !completedShiftLocked else { message = "Previous shift is locked until its archive is valid."; return }
         guard openingBaselineAccepted else { message = "Accept opening baseline first."; return }
         guard let odo = openingODO, odo > 0 else { message = "Opening ODO required."; return }
         lastGateReport = nil; showGateReport = false; shiftEndedAt = nil; closingODO = nil; draftClosingODO = 0
+        shiftLifecycle = .active
         shiftStartedAt = Date()
         appendEvent(.shiftStart, "Shift started", "Opening ODO \(odo)")
         workspace = .active
@@ -306,6 +315,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func returnToActive() {
+        guard mutationAllowed else { return }
         resetDraft(); loadVisitIndex = nil; workspace = .active
         message = "Returned to Active. Draft discarded; no event committed."
     }
@@ -314,15 +324,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard draftClosingODO >= (openingODO ?? 0) else { message = "Closing ODO must be ≥ opening ODO."; return }
         closingODO = draftClosingODO; shiftEndedAt = Date()
         appendEvent(.shiftEnd, "Shift ended", "Closing ODO \(draftClosingODO)")
-        completedShiftLocked = true
+        shiftLifecycle = .completedLocked
         workspace = .preShift
         message = "Finalising completed shift..."
         persistLiveSnapshot()
 
         guard evidenceSource == .live, let data = UserDefaults.standard.data(forKey: Self.persistenceKey) else {
             persistenceStatus = .fail
-            lastGateReport = buildLiveGateReport(); showGateReport = true
-            message = "Shift ended, but no durable snapshot was available."
+            lastGateReport = nil; showGateReport = false; shiftLifecycle = .recoveryLocked
+            message = "Shift ended, but no durable snapshot was available. Completed truth is locked for recovery."
             return
         }
         do {
@@ -336,8 +346,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             message = "Shift ended and archived."
         } catch {
             persistenceStatus = .fail
-            lastGateReport = buildLiveGateReport(); showGateReport = true
-            message = "Shift ended, but archive validation failed. Previous shift is locked: \(error)"
+            lastGateReport = nil; showGateReport = false; shiftLifecycle = .recoveryLocked
+            message = "Shift ended, but archive validation failed. Previous shift is locked for recovery: \(error)"
         }
     }
 
@@ -351,7 +361,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         shiftStartedAt = nil; shiftEndedAt = nil; openingODO = nil; closingODO = nil
         draftOpeningODO = 0; draftClosingODO = 0; cargoOpeningSnapshot = []
         unresolvedDiscrepancies = 0; selectedVisit = 0; selectedFill = 0; loadVisitIndex = nil
-        workspace = .preShift; persistedFingerprint = nil; completedShiftLocked = false
+        workspace = .preShift; persistedFingerprint = nil; shiftLifecycle = .fresh
         if !preservingCompletedReport { persistenceStatus = .notTested }
         draftLitres = Array(repeating: 0, count: compartments.count); draftBaseline = draftLitres
     }
@@ -382,18 +392,27 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     @discardableResult public func openSite(_ index: Int) -> Bool { guard canOpenOperationalWorkspace, visits.indices.contains(index), let nf = visits[index].fills.firstIndex(where: { !$0.completed }) else { return false }; selectedVisit = index; selectedFill = nf; loadVisitIndex = nil; resetDraft(); workspace = .site; return true }
     @discardableResult public func openNextIncompleteSite() -> Bool { guard let i = nextIncompleteVisitIndex else { return false }; return openSite(i) }
-    public func beginRest() { workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
-    public func endRest() { workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
-    public func openLoad(visitIndex: Int? = nil) { guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
-    public func resetDraft() { draftLitres = confirmedLitres; draftBaseline = draftLitres }
-    public func undoDraft() { draftLitres = draftBaseline; message = "Draft reset" }
-    public func setProduct(compartment index: Int, product: String) { guard compartments.indices.contains(index), Self.availableProducts.contains(product) else { return }; if confirmedLitres[index] > 0 && compartments[index].product != product { message = "Cannot change product while liquid remains"; return }; compartments[index].product = product }
-    public func setDraft(compartment index: Int, litres: Int) { guard draftLitres.indices.contains(index) else { return }; let clamped = min(max(0, litres), compartments[index].capacityLitres); if workspace == .site, let fill = currentFill { guard compartments[index].product == fill.product, clamped <= confirmedLitres[index] else { return } }; draftLitres[index] = clamped }
-    public func snapDelivery(compartment index: Int, proposed: Int) -> Int { guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
+    public func beginRest() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
+    public func endRest() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
+    public func openLoad(visitIndex: Int? = nil) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
+    public func resetDraft() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } draftLitres = confirmedLitres; draftBaseline = draftLitres }
+    public func undoDraft() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } draftLitres = draftBaseline; message = "Draft reset" }
+    public func setProduct(compartment index: Int, product: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard compartments.indices.contains(index), Self.availableProducts.contains(product) else { return }; if confirmedLitres[index] > 0 && compartments[index].product != product { message = "Cannot change product while liquid remains"; return }; compartments[index].product = product }
+    public func setDraft(compartment index: Int, litres: Int) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard draftLitres.indices.contains(index) else { return }; let clamped = min(max(0, litres), compartments[index].capacityLitres); if workspace == .site, let fill = currentFill { guard compartments[index].product == fill.product, clamped <= confirmedLitres[index] else { return } }; draftLitres[index] = clamped }
+    public func snapDelivery(compartment index: Int, proposed: Int) -> Int {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
 
     // MARK: - Cargo commits
 
     public func commitLoad() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         let before = confirmedLitres
         let now = Date()
         let operationID = nextOperationID("load")
@@ -417,6 +436,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func commitDelivery() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard deliveryDraftIsValid, let fill = currentFill, visits.indices.contains(selectedVisit), visits[selectedVisit].fills.indices.contains(selectedFill) else { message = "Delivery not committed: invalid draft."; return }
         let before = confirmedLitres
         let now = Date()
@@ -442,6 +462,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func commitTransfer(from: Int, to: Int, litres: Int) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard compartments.indices.contains(from), compartments.indices.contains(to), from != to, litres > 0 else { message = "Transfer not committed: invalid input."; return }
         guard compartments[from].product == compartments[to].product else { message = "Transfer not committed: product mismatch."; return }
         let now = Date()
@@ -456,6 +477,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard compartments.indices.contains(index), deltaLitres != 0 else { message = "Correction not committed: invalid input."; return }
         let current = confirmedLitres[index]
         let corrected = current + deltaLitres
@@ -469,6 +491,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard compartments.indices.contains(index) else { return }
         guard observedLitres >= 0, observedLitres <= compartments[index].capacityLitres else {
             message = "Reconciliation not committed: observed litres must be 0...\(compartments[index].capacityLitres)."
@@ -588,6 +611,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
         do {
             let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            if snapshot.shiftEndedAt != nil { shiftLifecycle = .completedLocked }
             try validate(snapshot: snapshot)
             if snapshot.shiftEndedAt != nil {
                 try archiveCompletedSnapshot(data, snapshot: snapshot)
@@ -601,8 +625,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             persistenceStatus = .pass
             message = "Recovered persisted live shift."
         } catch {
+            if let failedData = UserDefaults.standard.data(forKey: Self.persistenceKey), let failed = try? JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: failedData), failed.shiftEndedAt != nil { shiftLifecycle = .recoveryLocked }
             persistenceStatus = .fail
-            message = "Persisted shift recovery failed: \(error)"
+            message = "Persisted shift recovery failed; completed evidence remains locked: \(error)"
         }
     }
 
