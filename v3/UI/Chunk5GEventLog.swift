@@ -28,7 +28,7 @@ public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
 public typealias Chunk5GEventKind = Chunk5GEvent.Kind
 
 /// End-Shift Gate Report (Slice G) — derived solely from DA records.
-public struct Chunk5GGateReport: Equatable, Sendable {
+public enum Chunk5GCheckStatus: String, Equatable, Sendable { case pass = "PASS", fail = "FAIL", notTested = "NOT TESTED" }\n\npublic struct Chunk5GGateReport: Equatable, Sendable {
     public var shiftStart: Date?
     public var shiftEnd: Date?
     public var openingODO: Int?
@@ -47,7 +47,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
     public var reconciliationsRepresented: Bool
     public var cargoArithmeticOK: Bool
     public var odoAnchorsOK: Bool
-    public var persistenceOK: Bool
+    public var persistenceStatus: Chunk5GCheckStatus
 
     public var externalComparisonNote: String { "EXTERNAL REPORT COMPARISON: NOT YET CHECKED" }
 
@@ -59,7 +59,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         unresolvedDiscrepancies: Int = 0,
         loadsRepresented: Bool = true, deliveriesRepresented: Bool = true,
         transfersRepresented: Bool = true, reconciliationsRepresented: Bool = true,
-        cargoArithmeticOK: Bool = true, odoAnchorsOK: Bool = true, persistenceOK: Bool = true
+        cargoArithmeticOK: Bool = true, odoAnchorsOK: Bool = true, persistenceStatus: Chunk5GCheckStatus = .notTested
     ) {
         self.shiftStart = shiftStart; self.shiftEnd = shiftEnd
         self.openingODO = openingODO; self.closingODO = closingODO
@@ -68,6 +68,6 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         self.unresolvedDiscrepancies = unresolvedDiscrepancies
         self.loadsRepresented = loadsRepresented; self.deliveriesRepresented = deliveriesRepresented
         self.transfersRepresented = transfersRepresented; self.reconciliationsRepresented = reconciliationsRepresented
-        self.cargoArithmeticOK = cargoArithmeticOK; self.odoAnchorsOK = odoAnchorsOK; self.persistenceOK = persistenceOK
+        self.cargoArithmeticOK = cargoArithmeticOK; self.odoAnchorsOK = odoAnchorsOK; self.persistenceStatus = persistenceStatus
     }
 }
