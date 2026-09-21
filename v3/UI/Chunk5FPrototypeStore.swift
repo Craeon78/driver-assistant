@@ -393,21 +393,29 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @discardableResult public func openSite(_ index: Int) -> Bool { guard canOpenOperationalWorkspace, visits.indices.contains(index), let nf = visits[index].fills.firstIndex(where: { !$0.completed }) else { return false }; selectedVisit = index; selectedFill = nf; loadVisitIndex = nil; resetDraft(); workspace = .site; return true }
     @discardableResult public func openNextIncompleteSite() -> Bool { guard let i = nextIncompleteVisitIndex else { return false }; return openSite(i) }
     public func beginRest() {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
     public func endRest() {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
     public func openLoad(visitIndex: Int? = nil) {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
     public func resetDraft() {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } draftLitres = confirmedLitres; draftBaseline = draftLitres }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        draftLitres = confirmedLitres; draftBaseline = draftLitres }
     public func undoDraft() {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } draftLitres = draftBaseline; message = "Draft reset" }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        draftLitres = draftBaseline; message = "Draft reset" }
     public func setProduct(compartment index: Int, product: String) {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard compartments.indices.contains(index), Self.availableProducts.contains(product) else { return }; if confirmedLitres[index] > 0 && compartments[index].product != product { message = "Cannot change product while liquid remains"; return }; compartments[index].product = product }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard compartments.indices.contains(index), Self.availableProducts.contains(product) else { return }; if confirmedLitres[index] > 0 && compartments[index].product != product { message = "Cannot change product while liquid remains"; return }; compartments[index].product = product }
     public func setDraft(compartment index: Int, litres: Int) {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard draftLitres.indices.contains(index) else { return }; let clamped = min(max(0, litres), compartments[index].capacityLitres); if workspace == .site, let fill = currentFill { guard compartments[index].product == fill.product, clamped <= confirmedLitres[index] else { return } }; draftLitres[index] = clamped }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard draftLitres.indices.contains(index) else { return }; let clamped = min(max(0, litres), compartments[index].capacityLitres); if workspace == .site, let fill = currentFill { guard compartments[index].product == fill.product, clamped <= confirmedLitres[index] else { return } }; draftLitres[index] = clamped }
     public func snapDelivery(compartment index: Int, proposed: Int) -> Int {
-        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return } guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return proposed }
+        guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
 
     // MARK: - Cargo commits
 
@@ -618,6 +626,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
                 persistenceStatus = .pass
                 lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+                shiftLifecycle = .fresh
                 message = "Previous shift validated and archived. Ready for a new shift."
                 return
             }
