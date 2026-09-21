@@ -477,6 +477,13 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard evidenceSource == .live, let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
         do {
             let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            // A completed shift is durable history, not the mutable starting point for the next shift.
+            // Keep the saved snapshot untouched for Gate/history purposes; start a fresh current-shift store.
+            guard snapshot.shiftEndedAt == nil else {
+                persistenceStatus = .pass
+                message = "Previous shift is complete. Ready for a new shift."
+                return
+            }
             try apply(snapshot:snapshot)
             persistenceStatus = .pass
             message = "Recovered persisted live shift."
