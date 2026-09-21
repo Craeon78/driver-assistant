@@ -172,3 +172,25 @@ Bob should repair the authority path, not cosmetically patch observed numbers.
 > When a BUILD graduates from deterministic simulation/harness testing to human-entered or live-field testing, PREBUILD must explicitly inventory and quarantine synthetic fixtures before implementation.
 
 This belongs in CozzaHQ's lifecycle after the DA repair handoff. It is not a reason to restart 5G PREBUILD.
+
+
+## 8. Field Test 02 — reconciled cargo transaction boundary
+
+**Status:** BOB REPAIR AUTHORISED — Cory GO.
+
+The second live 5G simulation after PR #35 materially improved fixture isolation and live reconstruction: distinctive opening cargo and ODO survived, real interaction timestamps were retained, neutral Back committed nothing, and the old 5F demo deliveries were not manufactured in the Gate Report.
+
+The remaining P0 is now isolated. A driver-entered opening/takeover baseline establishes physical current cargo through `CargoReconciliationLog`, and `confirmedLitres` correctly projects it through `CargoStateReconciler.currentState`. Subsequent cargo-consuming operations still append/validate against raw `CargoLedger`, which has no ledger stock for a reconciliation-only opening baseline. A real 4,000 L delivery therefore failed with `insufficientQuantity`.
+
+**Repair invariant:** any operation validated against authoritative reconciled current cargo must also be committable and replayable against that same chronological cargo truth. A reconciliation must neither strand cargo outside the transaction path nor allow later transactions to resurrect pre-reconciliation state.
+
+Bob is authorised to repair this boundary across Delivery, Transfer, Correction and Load-after-reconciliation. Preserve reconciliation provenance; do not fabricate a Load, overwrite history, pass quantities view-to-view, or rewrite CargoLedger arithmetic merely to satisfy the harness.
+
+Also in this bounded repair:
+- derive Gate Report operation-representation checks from committed records rather than hard-coded `true`;
+- distinguish persistence/replay **NOT TESTED** from genuine **FAIL**;
+- retain Fixture/Live isolation and the existing shared truth spine.
+
+Run the distinctive-value regression after implementation, including a transaction **after** a physical reconciliation and save/relaunch reconstruction.
+
+**Branch/PR instruction:** all implementation commits for this repair must land on `chunk5g-reconciled-cargo-repair` and remain in its single repair PR. Do not create a second repair PR. Codex review, then Niles architecture/integration and Costa truth/provenance review, occur on that PR. Cory retains merge authority.
