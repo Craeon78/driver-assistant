@@ -105,7 +105,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var draftClosingODO: Int = 0
     @Published public var cargoOpeningSnapshot: [Int] = []
     @Published public var unresolvedDiscrepancies = 0
-    @Published public var persistenceOK = false
+    @Published public var persistenceStatus: Chunk5GCheckStatus = .notTested
 
     public private(set) var cargoLedger: CargoLedger
     public private(set) var reconciliationLog: CargoReconciliationLog
@@ -397,13 +397,13 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
         guard compartments.indices.contains(index), deltaLitres != 0 else { message = "Correction not committed: invalid input."; return }
-        guard let target = cargoLedger.transactions.last(where: { $0.sourceCompartmentID == compartments[index].cargoCompartmentID || $0.destinationCompartmentID == compartments[index].cargoCompartmentID }) else { message = "Correction not committed: no transaction to correct."; return }
+        let current = confirmedLitres[index]
+        let corrected = current + deltaLitres
+        guard corrected >= 0, corrected <= compartments[index].capacityLitres else { message = "Correction not committed: corrected quantity out of bounds."; return }
         let now = Date()
-        var candidate = cargoLedger
         do {
-            try candidate.append(CargoTransaction(kind: .correction, cargo: target.cargo, units: target.units, sourceCompartmentID: target.destinationCompartmentID, destinationCompartmentID: target.sourceCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, correctsTransactionID: target.id, note: note), reconciliationLog: reconciliationLog)
-            cargoLedger = candidate
-            appendEvent(.correction, "Cargo transaction corrected", note)
+            try reconciliationLog.append(CargoReconciliationEvent(compartmentID: compartments[index].cargoCompartmentID, cargo: cargo(for: compartments[index].product), calculatedUnitsBefore: Double(current), confirmedPhysicalUnitsAfter: Double(corrected), occurredAt: now, recordedAt: now, provenance: .driverEntered, note: "CORRECTION: " + note))
+            appendEvent(.correction, "Cargo correction C\(index + 1)", "\(deltaLitres > 0 ? "+" : "")\(deltaLitres) L; \(note)")
             resetDraft(); message = "Correction committed."; persistLiveSnapshot()
         } catch { message = "Correction not committed: \(error)" }
     }
@@ -433,12 +433,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let s = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
             guard s.evidenceSource == .live else { message = "Fixture snapshot rejected."; return }
             compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog; openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt; openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot; unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo; selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex
-            resetDraft(); persistenceOK = true; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
-        } catch { persistenceOK = false; message = "Relaunch restore failed: \(error)" }
+            resetDraft(); persistenceStatus = .pass; appendEvent(.relaunch, "Relaunch restored authoritative snapshot"); message = "Relaunch restored authoritative snapshot."
+        } catch { persistenceStatus = .fail; message = "Relaunch restore failed: \(error)" }
     }
 
     public func buildLiveGateReport() -> Chunk5GGateReport {
         let arithmeticOK = compartments.allSatisfy { (try? CargoStateReconciler.currentState(ledger: cargoLedger, reconciliationLog: reconciliationLog, compartmentID: $0.cargoCompartmentID)) != nil }
-        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: eventLog.filter { $0.kind == .load }.count == cargoLedger.transactions.filter { $0.kind == .load && $0.note == "chunk5g.load" }.count, deliveriesRepresented: eventLog.filter { $0.kind == .delivery }.count == cargoLedger.transactions.filter { $0.kind == .unload && $0.note == "chunk5g.delivery" }.count, transfersRepresented: eventLog.filter { $0.kind == .transfer }.count == cargoLedger.transactions.filter { $0.kind == .transfer && $0.note == "chunk5g.transfer" }.count, reconciliationsRepresented: eventLog.filter { $0.kind == .reconciliation }.count == reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0), persistenceStatus: persistenceOK ? .pass : .notTested)
+        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: eventLog.filter { $0.kind == .load }.count == cargoLedger.transactions.filter { $0.kind == .load && $0.note == "chunk5g.load" }.count, deliveriesRepresented: eventLog.filter { $0.kind == .delivery }.count == cargoLedger.transactions.filter { $0.kind == .unload && $0.note == "chunk5g.delivery" }.count, transfersRepresented: eventLog.filter { $0.kind == .transfer }.count == cargoLedger.transactions.filter { $0.kind == .transfer && $0.note == "chunk5g.transfer" }.count, reconciliationsRepresented: eventLog.filter { $0.kind == .reconciliation }.count == reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0), persistenceStatus: persistenceStatus, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
     }
 }
