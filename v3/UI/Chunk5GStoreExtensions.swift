@@ -31,4 +31,35 @@ extension Chunk5FPrototypeStore {
             persistenceOK: true
         )
     }
+
+    /// Select an incomplete drop at the current site without leaving Site workspace.
+    @discardableResult
+    public func selectFill(at fillIndex: Int) -> Bool {
+        guard workspace == .site,
+              visits.indices.contains(selectedVisit),
+              visits[selectedVisit].fills.indices.contains(fillIndex),
+              !visits[selectedVisit].fills[fillIndex].completed else { return false }
+        selectedFill = fillIndex
+        resetDraft()
+        let f = visits[selectedVisit].fills[fillIndex]
+        message = "Now serving \(f.name) — \(f.plannedLitres) L \(f.product)."
+        return true
+    }
+
+    /// Advance to next incomplete drop at the current site, or return to Active if none.
+    @discardableResult
+    public func advanceToNextFillAtSite() -> Bool {
+        guard visits.indices.contains(selectedVisit) else { return false }
+        if let next = visits[selectedVisit].fills.indices.first(where: { !visits[selectedVisit].fills[$0].completed }) {
+            selectedFill = next
+            resetDraft()
+            workspace = .site
+            let f = visits[selectedVisit].fills[next]
+            message = "Next drop: \(f.name) — \(f.plannedLitres) L \(f.product)."
+            return true
+        }
+        workspace = .active
+        message = "Site visit complete."
+        return false
+    }
 }
