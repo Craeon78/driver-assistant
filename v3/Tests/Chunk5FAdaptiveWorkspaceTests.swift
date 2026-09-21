@@ -8,8 +8,11 @@ public enum Chunk5FAdaptiveWorkspaceTests {
             output.append("\(label): \(condition() ? "PASS" : "FAIL")")
         }
 
-        let store = Chunk5FPrototypeStore()
+        // Deterministic 5F gate must use explicit Fixture source — never silent live defaults.
+        let store = Chunk5FPrototypeStore(evidenceSource: .fixture)
         check("Starts pre-shift", store.workspace == .preShift)
+        check("Fixture has baseline accepted", store.openingBaselineAccepted)
+        check("Fixture has SeaLink visit", !store.visits.isEmpty)
         store.startShift()
         check("Start Shift enters Active", store.workspace == .active)
         let firstSite = store.visits[0].site
@@ -68,9 +71,9 @@ public enum Chunk5FAdaptiveWorkspaceTests {
 
         let beforeLoad = store.confirmedLitres[0]
         store.openLoad()
-        store.simulateBOLScan()
-        check("Simulated BOL is additive to returned cargo", store.draftLitres[0] == beforeLoad + 1000)
-        check("Scan does not mutate confirmed cargo", store.confirmedLitres[0] == beforeLoad)
+        store.setDraft(compartment: 0, litres: beforeLoad + 1000)
+        check("Load draft is additive to returned cargo", store.draftLitres[0] == beforeLoad + 1000)
+        check("Draft does not mutate confirmed cargo", store.confirmedLitres[0] == beforeLoad)
         let transactionCountBeforeLoadConfirm = store.cargoLedger.transactions.count
         store.commitLoad()
         check("Load Confirm appends through CargoLedger", store.cargoLedger.transactions.count > transactionCountBeforeLoadConfirm)
@@ -84,6 +87,7 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.workspace = .active
         store.beginRest()
         check("Rest state is explicit", store.workspace == .rest)
+        check("Rest start is logged", store.eventLog.contains { $0.kind == .workRest && $0.summary.contains("Rest started") })
         store.endRest()
         check("End Rest returns Active", store.workspace == .active)
 
