@@ -16,7 +16,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     public init() {
-        _store = StateObject(wrappedValue: Chunk5FPrototypeStore(evidenceSource: .live))
+        _store = StateObject(wrappedValue: Chunk5FPrototypeStore())
     }
 
     public var body: some View {
