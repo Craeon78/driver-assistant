@@ -3,7 +3,7 @@ import Foundation
 public enum CargoLedgerError: Error, Equatable {
     case nonPositiveQuantity, unknownSourceCompartment, unknownDestinationCompartment, invalidEndpoints
     case sameTransferCompartment, insufficientQuantity, capacityExceeded, mixedCargo
-    case correctionTargetMissing, correctionTargetAlreadyCorrected, duplicateCompartmentLimit, duplicateTransactionID
+    case correctionTargetMissing, correctionTargetAlreadyCorrected, duplicateCompartmentLimit, duplicateTransactionID, reconciliationRequired
 }
 
 public struct CargoLedger: Codable, Sendable, Equatable {
@@ -16,13 +16,30 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         self.limits=limits; self.transactions=[]
         for t in transactions.sorted(by: Self.order) { try append(t) }
     }
-    private enum CodingKeys: String, CodingKey { case limits, transactions }
+    private enum CodingKeys: String, CodingKey { case limits, transactions, requiresReconciliationForReplay }
     public init(from decoder: Decoder) throws {
         let c=try decoder.container(keyedBy:CodingKeys.self)
-        do { self=try CargoLedger(limits:c.decode([CargoCompartmentLimit].self,forKey:.limits),transactions:c.decode([CargoTransaction].self,forKey:.transactions)) }
-        catch { throw DecodingError.dataCorruptedError(forKey:.transactions,in:c,debugDescription:"Cargo ledger failed validated replay: \(error)") }
+        let decodedLimits=try c.decode([CargoCompartmentLimit].self,forKey:.limits)
+        let decodedTransactions=try c.decode([CargoTransaction].self,forKey:.transactions)
+        let reconciliationAware=try c.decodeIfPresent(Bool.self,forKey:.requiresReconciliationForReplay) ?? false
+        if !reconciliationAware {
+            do { self=try CargoLedger(limits:decodedLimits,transactions:decodedTransactions) }
+            catch { throw DecodingError.dataCorruptedError(forKey:.transactions,in:c,debugDescription:"Cargo ledger failed validated replay: \\(error)") }
+            return
+        }
+        var seenLimits=Set<CanonicalID>()
+        for limit in decodedLimits { guard seenLimits.insert(limit.compartmentID).inserted else { throw DecodingError.dataCorruptedError(forKey:.limits,in:c,debugDescription:"Duplicate compartment limit") } }
+        self.limits=decodedLimits; self.transactions=[]; self.requiresReconciliationForReplay=true
+        do {
+            for t in decodedTransactions.sorted(by:Self.order) {
+                guard t.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
+                guard !transactions.contains(where:{$0.id==t.id}) else { throw CargoLedgerError.duplicateTransactionID }
+                try validateShape(t); if t.kind == .correction { try validateCorrection(t) }
+                transactions.append(t)
+            }
+        } catch { throw DecodingError.dataCorruptedError(forKey:.transactions,in:c,debugDescription:"Reconciliation-aware cargo ledger failed structural replay: \\(error)") }
     }
-    public func encode(to encoder: Encoder) throws { var c=encoder.container(keyedBy:CodingKeys.self); try c.encode(limits,forKey:.limits); try c.encode(transactions,forKey:.transactions) }
+    public func encode(to encoder: Encoder) throws { var c=encoder.container(keyedBy:CodingKeys.self); try c.encode(limits,forKey:.limits); try c.encode(transactions,forKey:.transactions); try c.encode(requiresReconciliationForReplay,forKey:.requiresReconciliationForReplay) }
 
     public mutating func append(_ t: CargoTransaction) throws {
         guard t.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
@@ -35,7 +52,7 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         guard limits.contains(where:{$0.compartmentID==compartmentID}) else { throw CargoLedgerError.unknownDestinationCompartment }
         return CargoCompartmentState(compartmentID:compartmentID,quantity:try Self.project(limits:limits,transactions:transactions)[compartmentID])
     }
-    public func allStates() throws -> [CargoCompartmentState] { let p=try Self.project(limits:limits,transactions:transactions); return limits.map{CargoCompartmentState(compartmentID:$0.compartmentID,quantity:p[$0.compartmentID])} }
+    public func allStates() throws -> [CargoCompartmentState] { guard !requiresReconciliationForReplay else { throw CargoLedgerError.reconciliationRequired }; let p=try Self.project(limits:limits,transactions:transactions); return limits.map{CargoCompartmentState(compartmentID:$0.compartmentID,quantity:p[$0.compartmentID])} }
     public func currentCargoMassKg() throws -> Double? { let q=try allStates().compactMap(\.quantity); guard q.allSatisfy({$0.massKg != nil}) else{return nil}; return q.compactMap(\.massKg).reduce(0,+) }
 
     private func validateShape(_ t: CargoTransaction) throws {
