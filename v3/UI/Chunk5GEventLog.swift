@@ -1,16 +1,17 @@
 import Foundation
 
 /// Minimal chronological event for 5G reconstruction (Slice F) and Gate Report (Slice G).
-public struct Chunk5GEvent: Identifiable, Equatable, Sendable {
+public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public let timestamp: Date
     public let kind: Kind
     public let summary: String
     public let detail: String
 
-    public enum Kind: String, Sendable {
+    public enum Kind: String, Codable, Sendable {
         case shiftStart, shiftEnd
         case load, delivery, transfer, reconciliation
+        case correction
         case workRest
         case planChange
         case cargoBaseline
@@ -23,13 +24,16 @@ public struct Chunk5GEvent: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Convenience alias used by the 5G store / gate builders.
+public typealias Chunk5GEventKind = Chunk5GEvent.Kind
+
 /// End-Shift Gate Report (Slice G) — derived solely from DA records.
 public struct Chunk5GGateReport: Equatable, Sendable {
     public var shiftStart: Date?
     public var shiftEnd: Date?
     public var openingODO: Int?
     public var closingODO: Int?
-    public var derivedKm: Int { 
+    public var derivedKm: Int {
         guard let o = openingODO, let c = closingODO else { return 0 }
         return max(0, c - o)
     }
