@@ -31,7 +31,8 @@ public struct Chunk5GGateReportView: View {
                     check("Deliveries represented", report.deliveriesRepresented)
                     check("Transfers represented", report.transfersRepresented)
                     check("Reconciliations represented", report.reconciliationsRepresented)
-                    check("Persistence/replay", report.persistenceOK)
+                    row("Completed planned deliveries", "\(report.completedPlannedDeliveries) / \(report.plannedDeliveries)")
+                    status("Persistence/replay", report.persistenceStatus)
                 }
                 Section("CHRONOLOGICAL EVENTS") {
                     ForEach(report.events) { ev in
@@ -70,6 +71,9 @@ public struct Chunk5GGateReportView: View {
                 .foregroundStyle(ok ? .green : .red)
                 .bold()
         }
+    }
+    private func status(_ label: String, _ value: Chunk5GCheckStatus) -> some View {
+        HStack { Text(label); Spacer(); Text(value.rawValue).bold() }
     }
     private func fmt(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)

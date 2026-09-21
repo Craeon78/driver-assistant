@@ -9,6 +9,10 @@ public enum Chunk5GEvidenceSource: String, Codable, Sendable {
     case fixture
 }
 
+public enum Chunk5GShiftLifecycle: String, Codable, Sendable {
+    case fresh, active, completedLocked, recoveryLocked
+}
+
 public enum Chunk5FWorkspaceState: String, CaseIterable, Codable, Sendable {
     case preShift = "Pre-shift"
     case active = "Active"
@@ -78,6 +82,8 @@ private struct Chunk5GLiveSnapshot: Codable {
     var selectedFill: Int
     var restMinutes: Int
     var loadVisitIndex: Int?
+    var workspace: Chunk5FWorkspaceState
+    var authoritativeFingerprint: String
 }
 
 @MainActor
@@ -105,7 +111,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     @Published public var draftClosingODO: Int = 0
     @Published public var cargoOpeningSnapshot: [Int] = []
     @Published public var unresolvedDiscrepancies = 0
-    @Published public var persistenceOK = false
+    @Published public var persistenceStatus: Chunk5GCheckStatus = .notTested
+    @Published public private(set) var shiftLifecycle: Chunk5GShiftLifecycle = .fresh
+    public var completedShiftLocked: Bool { shiftLifecycle == .completedLocked || shiftLifecycle == .recoveryLocked }
+    private var mutationAllowed: Bool { shiftLifecycle == .fresh || shiftLifecycle == .active }
 
     public private(set) var cargoLedger: CargoLedger
     public private(set) var reconciliationLog: CargoReconciliationLog
@@ -113,12 +122,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private var ulpCargo: CargoKind
     private var draftBaseline: [Int] = []
     private var loadVisitIndex: Int? = nil
+    private var persistedFingerprint: String? = nil
 
     public static let availableProducts = ["XLS", "ULP"]
-    private static let persistenceKey = "chunk5g.live.snapshot.v2"
+    private static let persistenceKey = "chunk5g.live.snapshot.v3"
+    private static let completedPersistenceKey = "chunk5g.completed.previous.snapshot.v3"
 
     public convenience init() {
         self.init(evidenceSource: .live)
+        restorePersistedLiveSnapshotOnLaunch()
     }
 
     public init(evidenceSource: Chunk5GEvidenceSource) {
@@ -211,9 +223,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return t + max(0, confirmedLitres[i] - draftLitres[i])
         }
     }
-    public var canReorderRun: Bool { prototypeSpeedKmh <= 5 }
-    public var canOpenOperationalWorkspace: Bool { prototypeSpeedKmh <= 5 }
-    public var canMutateRemainingPlan: Bool { workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5) }
+    public var canReorderRun: Bool { mutationAllowed && prototypeSpeedKmh <= 5 }
+    public var canOpenOperationalWorkspace: Bool { mutationAllowed && prototypeSpeedKmh <= 5 }
+    public var canMutateRemainingPlan: Bool { mutationAllowed && (workspace == .preShift || (workspace == .active && prototypeSpeedKmh <= 5)) }
     public var deliveryDraftIsValid: Bool {
         guard let fill = currentFill else { return false }
         let before = confirmedLitres
@@ -234,14 +246,23 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         eventLog.append(Chunk5GEvent(timestamp: Date(), kind: kind, summary: summary, detail: detail))
     }
 
+    private func nextOperationID(_ kind: String) -> String {
+        "chunk5g.\(kind).op.\(UUID().uuidString)"
+    }
+
+    private func persistPlanMutation() {
+        if evidenceSource == .live { persistLiveSnapshot() }
+    }
+
     // MARK: - Opening baseline (reconciliation boundary — not a Load)
 
     public func setOpeningDraft(compartment index: Int, litres: Int) {
-        guard draftLitres.indices.contains(index), !openingBaselineAccepted else { return }
+        guard mutationAllowed, draftLitres.indices.contains(index), !openingBaselineAccepted else { return }
         draftLitres[index] = min(max(0, litres), compartments[index].capacityLitres)
     }
 
     public func acceptOpeningBaseline() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard !openingBaselineAccepted else { message = "Baseline already accepted."; return }
         guard draftOpeningODO > 0 else {
             message = "Enter opening ODO before accepting baseline."; return
@@ -274,7 +295,367 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         appendEvent(.cargoBaseline, "Opening cargo baseline accepted",
                     "ODO \(draftOpeningODO); " + confirmedLitres.map(String.init).joined(separator: ","))
         message = "Opening cargo baseline accepted (not a Load)."
+        persistLiveSnapshot()
     }
 
-    // REST OF FILE CONTINUES IN NEXT COMMIT - SEE REPO
+    // MARK: - Shift lifecycle
+
+    public func startShift() {
+        guard mutationAllowed else { message = "Previous shift is locked until recovery succeeds."; return }
+        guard !completedShiftLocked else { message = "Previous shift is locked until its archive is valid."; return }
+        guard openingBaselineAccepted else { message = "Accept opening baseline first."; return }
+        guard let odo = openingODO, odo > 0 else { message = "Opening ODO required."; return }
+        lastGateReport = nil; showGateReport = false; shiftEndedAt = nil; closingODO = nil; draftClosingODO = 0
+        shiftLifecycle = .active
+        shiftStartedAt = Date()
+        appendEvent(.shiftStart, "Shift started", "Opening ODO \(odo)")
+        workspace = .active
+        message = "Shift started."
+        persistLiveSnapshot()
+    }
+
+    public func returnToActive() {
+        guard mutationAllowed else { return }
+        resetDraft(); loadVisitIndex = nil; workspace = .active
+        message = "Returned to Active. Draft discarded; no event committed."
+    }
+
+    public func endShift() {
+        guard draftClosingODO >= (openingODO ?? 0) else { message = "Closing ODO must be ≥ opening ODO."; return }
+        closingODO = draftClosingODO; shiftEndedAt = Date()
+        appendEvent(.shiftEnd, "Shift ended", "Closing ODO \(draftClosingODO)")
+        shiftLifecycle = .completedLocked
+        workspace = .preShift
+        message = "Finalising completed shift..."
+        persistLiveSnapshot()
+
+        guard evidenceSource == .live, let data = UserDefaults.standard.data(forKey: Self.persistenceKey) else {
+            persistenceStatus = .fail
+            lastGateReport = nil; showGateReport = false; shiftLifecycle = .recoveryLocked
+            message = "Shift ended, but no durable snapshot was available. Completed truth is locked for recovery."
+            return
+        }
+        do {
+            let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            try archiveCompletedSnapshot(data, snapshot: snapshot)
+            persistenceStatus = .pass
+            lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+            showGateReport = true
+            UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
+            resetForNewShift(preservingCompletedReport: true)
+            message = "Shift ended and archived."
+        } catch {
+            persistenceStatus = .fail
+            lastGateReport = nil; showGateReport = false; shiftLifecycle = .recoveryLocked
+            message = "Shift ended, but archive validation failed. Previous shift is locked for recovery: \(error)"
+        }
+    }
+
+    private func resetForNewShift(preservingCompletedReport: Bool = false) {
+        let limits = compartments.map {
+            CargoCompartmentLimit(compartmentID: $0.cargoCompartmentID, capacityUnits: Double($0.capacityLitres))
+        }
+        cargoLedger = try! CargoLedger(limits: limits)
+        reconciliationLog = try! CargoReconciliationLog()
+        visits = []; eventLog = []; openingBaselineAccepted = false
+        shiftStartedAt = nil; shiftEndedAt = nil; openingODO = nil; closingODO = nil
+        draftOpeningODO = 0; draftClosingODO = 0; cargoOpeningSnapshot = []
+        unresolvedDiscrepancies = 0; selectedVisit = 0; selectedFill = 0; loadVisitIndex = nil
+        workspace = .preShift; persistedFingerprint = nil; shiftLifecycle = .fresh
+        if !preservingCompletedReport { persistenceStatus = .notTested }
+        draftLitres = Array(repeating: 0, count: compartments.count); draftBaseline = draftLitres
+    }
+
+    // MARK: - Plan mutation
+
+    public func addSiteVisit(customer: String, site: String, fillName: String, product: String, plannedLitres: Int) {
+        guard canMutateRemainingPlan else { return }
+        visits.append(Chunk5FSiteVisit(customer: customer, site: site, projectedTime: "—", fills: [Chunk5FFillItem(name: fillName, product: product, plannedLitres: plannedLitres)]))
+        appendEvent(.planChange, "Added site visit", "\(customer) — \(site)"); persistPlanMutation()
+    }
+    public func addTerminalLoad() {
+        guard canMutateRemainingPlan else { return }
+        visits.append(Chunk5FSiteVisit(customer: "TERMINAL", site: "LOAD", projectedTime: "—", fills: [Chunk5FFillItem(name: "Load", product: "XLS", plannedLitres: 0)], isTerminalLoad: true))
+        appendEvent(.planChange, "Added Terminal / Load"); persistPlanMutation()
+    }
+    public func addFill(toVisitIndex index: Int, name: String, product: String, plannedLitres: Int) {
+        guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].isComplete else { return }
+        visits[index].fills.append(Chunk5FFillItem(name: name, product: product, plannedLitres: plannedLitres))
+        appendEvent(.planChange, "Added fill", "\(visits[index].customer)/\(name)"); persistPlanMutation()
+    }
+    public func updateVisit(at index: Int, customer: String, site: String) { guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].fills.contains(where: \.completed) else { return }; visits[index].customer = customer; visits[index].site = site; appendEvent(.planChange, "Updated site visit", "\(customer) — \(site)"); persistPlanMutation() }
+    public func updateFill(visitIndex: Int, fillIndex: Int, name: String, product: String, plannedLitres: Int) { guard canMutateRemainingPlan, visits.indices.contains(visitIndex), visits[visitIndex].fills.indices.contains(fillIndex), !visits[visitIndex].fills[fillIndex].completed else { return }; visits[visitIndex].fills[fillIndex].name = name; visits[visitIndex].fills[fillIndex].product = product; visits[visitIndex].fills[fillIndex].plannedLitres = plannedLitres; appendEvent(.planChange, "Updated fill", "\(name) — \(plannedLitres) L \(product)"); persistPlanMutation() }
+    public func removeVisit(at index: Int) { guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].fills.contains(where: \.completed) else { return }; let removed=visits.remove(at:index); appendEvent(.planChange, "Removed site visit", "\(removed.customer) — \(removed.site)"); persistPlanMutation() }
+    public func removeFill(visitIndex: Int, fillIndex: Int) { guard canMutateRemainingPlan, visits.indices.contains(visitIndex), visits[visitIndex].fills.indices.contains(fillIndex), !visits[visitIndex].fills[fillIndex].completed, visits[visitIndex].fills.count > 1 else { return }; let removed=visits[visitIndex].fills.remove(at:fillIndex); appendEvent(.planChange, "Removed fill", removed.name); persistPlanMutation() }
+    public func moveVisit(from source: IndexSet, to destination: Int) { guard canReorderRun else { return }; visits.move(fromOffsets: source, toOffset: destination); appendEvent(.planChange, "Reordered remaining run"); persistPlanMutation() }
+    public func setPrototypeMoving(_ moving: Bool) { prototypeSpeedKmh = moving ? 42 : 0 }
+
+    @discardableResult public func openSite(_ index: Int) -> Bool { guard canOpenOperationalWorkspace, visits.indices.contains(index), let nf = visits[index].fills.firstIndex(where: { !$0.completed }) else { return false }; selectedVisit = index; selectedFill = nf; loadVisitIndex = nil; resetDraft(); workspace = .site; return true }
+    @discardableResult public func openNextIncompleteSite() -> Bool { guard let i = nextIncompleteVisitIndex else { return false }; return openSite(i) }
+    public func beginRest() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        workspace = .rest; restMinutes = 18; appendEvent(.workRest, "Rest started"); persistLiveSnapshot() }
+    public func endRest() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        workspace = .active; appendEvent(.workRest, "Rest ended"); persistLiveSnapshot() }
+    public func openLoad(visitIndex: Int? = nil) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard canOpenOperationalWorkspace || workspace == .active else { return }; loadVisitIndex = visitIndex; if let vi = visitIndex { selectedVisit = vi }; resetDraft(); workspace = .load }
+    public func resetDraft() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        draftLitres = confirmedLitres; draftBaseline = draftLitres }
+    public func undoDraft() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        draftLitres = draftBaseline; message = "Draft reset" }
+    public func setProduct(compartment index: Int, product: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard compartments.indices.contains(index), Self.availableProducts.contains(product) else { return }; if confirmedLitres[index] > 0 && compartments[index].product != product { message = "Cannot change product while liquid remains"; return }; compartments[index].product = product }
+    public func setDraft(compartment index: Int, litres: Int) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard draftLitres.indices.contains(index) else { return }; let clamped = min(max(0, litres), compartments[index].capacityLitres); if workspace == .site, let fill = currentFill { guard compartments[index].product == fill.product, clamped <= confirmedLitres[index] else { return } }; draftLitres[index] = clamped }
+    public func snapDelivery(compartment index: Int, proposed: Int) -> Int {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return proposed }
+        guard let fill = currentFill, compartments[index].product == fill.product else { return proposed }; let original = confirmedLitres[index]; if proposed <= max(80, Int(Double(original) * 0.04)) { return 0 }; let plannedRemaining = max(0, original - plannedDelivery); return abs(proposed - plannedRemaining) <= 150 ? plannedRemaining : proposed }
+
+    // MARK: - Cargo commits
+
+    public func commitLoad() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        let before = confirmedLitres
+        let now = Date()
+        let operationID = nextOperationID("load")
+        var candidate = cargoLedger
+        var added = 0
+        do {
+            for i in compartments.indices where draftLitres[i] > before[i] {
+                let delta = draftLitres[i] - before[i]
+                try candidate.append(CargoTransaction(kind: .load, cargo: cargo(for: compartments[i].product), units: Double(delta), destinationCompartmentID: compartments[i].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: operationID), reconciliationLog: reconciliationLog)
+                added += delta
+            }
+            guard added > 0 else { message = "Load not committed: no added cargo."; return }
+            cargoLedger = candidate
+            if let vi = loadVisitIndex, visits.indices.contains(vi) {
+                for fi in visits[vi].fills.indices { visits[vi].fills[fi].completed = true }
+            }
+            appendEvent(.load, "Load confirmed", "\(added) L")
+            resetDraft(); loadVisitIndex = nil; workspace = .active
+            message = "Load committed: \(added) L."; persistLiveSnapshot()
+        } catch { message = "Load not committed: \(error)" }
+    }
+
+    public func commitDelivery() {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard deliveryDraftIsValid, let fill = currentFill, visits.indices.contains(selectedVisit), visits[selectedVisit].fills.indices.contains(selectedFill) else { message = "Delivery not committed: invalid draft."; return }
+        let before = confirmedLitres
+        let now = Date()
+        let operationID = nextOperationID("delivery")
+        var candidate = cargoLedger
+        var delivered = 0
+        do {
+            for i in compartments.indices where compartments[i].product == fill.product && draftLitres[i] < before[i] {
+                let delta = before[i] - draftLitres[i]
+                try candidate.append(CargoTransaction(kind: .unload, cargo: cargo(for: fill.product), units: Double(delta), sourceCompartmentID: compartments[i].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: operationID), reconciliationLog: reconciliationLog)
+                delivered += delta
+            }
+            guard delivered > 0 else { message = "Delivery not committed: zero movement."; return }
+            cargoLedger = candidate
+            let identity = "\(visits[selectedVisit].customer) — \(visits[selectedVisit].site) / \(fill.name)"
+            visits[selectedVisit].fills[selectedFill].completed = true
+            appendEvent(.delivery, "Delivery \(delivered) L", "\(identity); \(fill.product)")
+            resetDraft()
+            _ = advanceToNextFillAtSite()
+            message = visits[selectedVisit].isComplete ? "Delivery committed: \(delivered) L. Site visit complete." : "Delivery committed: \(delivered) L. Next fill ready."
+            persistLiveSnapshot()
+        } catch { message = "Delivery not committed: \(error)" }
+    }
+
+    public func commitTransfer(from: Int, to: Int, litres: Int) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard compartments.indices.contains(from), compartments.indices.contains(to), from != to, litres > 0 else { message = "Transfer not committed: invalid input."; return }
+        guard compartments[from].product == compartments[to].product else { message = "Transfer not committed: product mismatch."; return }
+        let now = Date()
+        let operationID = nextOperationID("transfer")
+        var candidate = cargoLedger
+        do {
+            try candidate.append(CargoTransaction(kind: .transfer, cargo: cargo(for: compartments[from].product), units: Double(litres), sourceCompartmentID: compartments[from].cargoCompartmentID, destinationCompartmentID: compartments[to].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: operationID), reconciliationLog: reconciliationLog)
+            cargoLedger = candidate
+            appendEvent(.transfer, "Transfer \(litres) L", "C\(from + 1) → C\(to + 1); \(compartments[from].product)")
+            resetDraft(); message = "Transfer committed."; persistLiveSnapshot()
+        } catch { message = "Transfer not committed: \(error)" }
+    }
+
+    public func commitCorrection(compartment index: Int, deltaLitres: Int, note: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard compartments.indices.contains(index), deltaLitres != 0 else { message = "Correction not committed: invalid input."; return }
+        let current = confirmedLitres[index]
+        let corrected = current + deltaLitres
+        guard corrected >= 0, corrected <= compartments[index].capacityLitres else { message = "Correction not committed: corrected quantity out of bounds."; return }
+        let now = Date()
+        do {
+            try reconciliationLog.append(CargoReconciliationEvent(compartmentID: compartments[index].cargoCompartmentID, cargo: cargo(for: compartments[index].product), calculatedUnitsBefore: Double(current), confirmedPhysicalUnitsAfter: Double(corrected), occurredAt: now, recordedAt: now, provenance: .driverEntered, note: "CORRECTION: " + note))
+            appendEvent(.correction, "Cargo correction C\(index + 1)", "\(deltaLitres > 0 ? "+" : "")\(deltaLitres) L; \(note)")
+            resetDraft(); message = "Correction committed."; persistLiveSnapshot()
+        } catch { message = "Correction not committed: \(error)" }
+    }
+
+    public func commitReconciliation(compartment index: Int, observedLitres: Int, note: String) {
+        guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard compartments.indices.contains(index) else { return }
+        guard observedLitres >= 0, observedLitres <= compartments[index].capacityLitres else {
+            message = "Reconciliation not committed: observed litres must be 0...\(compartments[index].capacityLitres)."
+            return
+        }
+        let calc = Double(confirmedLitres[index]); let obs = Double(observedLitres); let now = Date()
+        do {
+            try reconciliationLog.append(CargoReconciliationEvent(compartmentID: compartments[index].cargoCompartmentID, cargo: cargo(for: compartments[index].product), calculatedUnitsBefore: calc, confirmedPhysicalUnitsAfter: obs, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: note))
+            if abs(obs - calc) > 0.5 { unresolvedDiscrepancies += 1 }
+            appendEvent(.reconciliation, "Reconcile C\(index + 1)", "observed \(observedLitres) L")
+            resetDraft(); persistLiveSnapshot()
+        } catch { message = "Reconciliation failed: \(error)" }
+    }
+
+    // MARK: - Persistence / gate
+
+    private func authoritativeFingerprint() -> String {
+        let cargo = confirmedLitres.map(String.init).joined(separator: ",")
+        let run = visits.map { v in
+            let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
+            return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
+        }.joined(separator: "||")
+        let history = eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        return cargo + "##" + run + "##" + history
+    }
+
+    public func persistLiveSnapshot() {
+        guard evidenceSource == .live else { return }
+        let fingerprint = authoritativeFingerprint()
+        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, workspace: workspace, authoritativeFingerprint: fingerprint)
+        do { UserDefaults.standard.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = fingerprint } catch { message = "Snapshot save failed: \(error)" }
+    }
+
+    private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
+        guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        for c in s.compartments {
+            _ = try CargoStateReconciler.currentState(
+                ledger: s.cargoLedger,
+                reconciliationLog: s.reconciliationLog,
+                compartmentID: c.cargoCompartmentID
+            )
+        }
+        let cargo = try s.compartments.map { c -> String in
+            let state = try CargoStateReconciler.currentState(
+                ledger: s.cargoLedger,
+                reconciliationLog: s.reconciliationLog,
+                compartmentID: c.cargoCompartmentID
+            )
+            return String(Int((state.quantity?.units ?? 0).rounded()))
+        }.joined(separator: ",")
+        let run = s.visits.map { v in
+            let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
+            return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
+        }.joined(separator: "||")
+        let history = s.eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        guard cargo + "##" + run + "##" + history == s.authoritativeFingerprint else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+    }
+
+    private func installValidated(snapshot s: Chunk5GLiveSnapshot) throws {
+        try validate(snapshot: s)
+        compartments=s.compartments; visits=s.visits; eventLog=s.eventLog; cargoLedger=s.cargoLedger; reconciliationLog=s.reconciliationLog
+        openingBaselineAccepted=s.openingBaselineAccepted; shiftStartedAt=s.shiftStartedAt; shiftEndedAt=s.shiftEndedAt
+        openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot
+        unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo
+        selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex; workspace=s.workspace
+        resetDraft()
+        persistedFingerprint=s.authoritativeFingerprint
+    }
+
+    private func archiveCompletedSnapshot(_ data: Data, snapshot: Chunk5GLiveSnapshot) throws {
+        guard snapshot.shiftEndedAt != nil else { return }
+        try validate(snapshot: snapshot)
+        UserDefaults.standard.set(data, forKey: Self.completedPersistenceKey)
+    }
+
+    private func gateReport(fromValidated s: Chunk5GLiveSnapshot, persistenceStatus status: Chunk5GCheckStatus) throws -> Chunk5GGateReport {
+        try validate(snapshot: s)
+        let cargoClosing = try s.compartments.map { c -> Int in
+            let state = try CargoStateReconciler.currentState(ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartmentID: c.cargoCompartmentID)
+            return Int((state.quantity?.units ?? 0).rounded())
+        }
+        let arithmeticOK = s.compartments.allSatisfy { c in
+            (try? CargoStateReconciler.currentState(ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartmentID: c.cargoCompartmentID)) != nil
+        }
+        return Chunk5GGateReport(
+            shiftStart: s.shiftStartedAt, shiftEnd: s.shiftEndedAt, openingODO: s.openingODO, closingODO: s.closingODO,
+            events: s.eventLog, cargoOpening: s.cargoOpeningSnapshot, cargoClosing: cargoClosing,
+            unresolvedDiscrepancies: s.unresolvedDiscrepancies,
+            loadsRepresented: s.eventLog.filter { $0.kind == .load }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .load && ($0.note?.hasPrefix("chunk5g.load.op.") ?? false) }.compactMap(\.note)).count,
+            deliveriesRepresented: s.eventLog.filter { $0.kind == .delivery }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .unload && ($0.note?.hasPrefix("chunk5g.delivery.op.") ?? false) }.compactMap(\.note)).count,
+            transfersRepresented: s.eventLog.filter { $0.kind == .transfer }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .transfer && ($0.note?.hasPrefix("chunk5g.transfer.op.") ?? false) }.compactMap(\.note)).count,
+            reconciliationsRepresented: s.eventLog.filter { $0.kind == .reconciliation }.count + s.eventLog.filter { $0.kind == .correction }.count == s.reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count,
+            cargoArithmeticOK: arithmeticOK,
+            odoAnchorsOK: (s.openingODO ?? 0) > 0 && (s.closingODO ?? 0) >= (s.openingODO ?? 0),
+            persistenceStatus: status,
+            plannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count,
+            completedPlannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count
+        )
+    }
+
+    private func restoreArchivedGateReport() {
+        guard let data = UserDefaults.standard.data(forKey: Self.completedPersistenceKey) else { return }
+        do {
+            let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+        } catch {
+            persistenceStatus = .fail
+            message = "Previous completed shift archive failed validation: \(error)"
+        }
+    }
+
+    private func restorePersistedLiveSnapshotOnLaunch() {
+        guard evidenceSource == .live else { return }
+        restoreArchivedGateReport()
+        guard let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { return }
+        do {
+            let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            if snapshot.shiftEndedAt != nil { shiftLifecycle = .completedLocked }
+            try validate(snapshot: snapshot)
+            if snapshot.shiftEndedAt != nil {
+                try archiveCompletedSnapshot(data, snapshot: snapshot)
+                UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
+                persistenceStatus = .pass
+                lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+                shiftLifecycle = .fresh
+                message = "Previous shift validated and archived. Ready for a new shift."
+                return
+            }
+            try installValidated(snapshot:snapshot)
+            persistenceStatus = .pass
+            message = "Recovered persisted live shift."
+        } catch {
+            if let failedData = UserDefaults.standard.data(forKey: Self.persistenceKey), let failed = try? JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: failedData), failed.shiftEndedAt != nil { shiftLifecycle = .recoveryLocked }
+            persistenceStatus = .fail
+            message = "Persisted shift recovery failed; completed evidence remains locked: \(error)"
+        }
+    }
+
+    public func simulateRelaunch() {
+        guard let data=UserDefaults.standard.data(forKey:Self.persistenceKey) else { message="No snapshot to restore."; return }
+        do {
+            let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
+            try installValidated(snapshot:snapshot)
+            persistenceStatus = .pass
+            appendEvent(.relaunch,"Relaunch restored authoritative snapshot")
+            message="Relaunch restored authoritative snapshot."
+        } catch {
+            persistenceStatus = .fail
+            message="Relaunch restore failed: \(error)"
+        }
+    }
+
+    public func buildLiveGateReport() -> Chunk5GGateReport {
+        let arithmeticOK = compartments.allSatisfy { (try? CargoStateReconciler.currentState(ledger: cargoLedger, reconciliationLog: reconciliationLog, compartmentID: $0.cargoCompartmentID)) != nil }
+        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: eventLog.filter { $0.kind == .load }.count == Set(cargoLedger.transactions.filter { $0.kind == .load && ($0.note?.hasPrefix("chunk5g.load.op.") ?? false) }.compactMap(\.note)).count, deliveriesRepresented: eventLog.filter { $0.kind == .delivery }.count == Set(cargoLedger.transactions.filter { $0.kind == .unload && ($0.note?.hasPrefix("chunk5g.delivery.op.") ?? false) }.compactMap(\.note)).count, transfersRepresented: eventLog.filter { $0.kind == .transfer }.count == Set(cargoLedger.transactions.filter { $0.kind == .transfer && ($0.note?.hasPrefix("chunk5g.transfer.op.") ?? false) }.compactMap(\.note)).count, reconciliationsRepresented: eventLog.filter { $0.kind == .reconciliation }.count + eventLog.filter { $0.kind == .correction }.count == reconciliationLog.events.filter { $0.note != "chunk5g.opening.baseline" }.count, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0), persistenceStatus: persistenceStatus, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
+    }
 }
