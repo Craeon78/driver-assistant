@@ -353,6 +353,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func commitLoad() {
         let before = confirmedLitres
         let now = Date()
+        let operationID = nextOperationID("load")
         var candidate = cargoLedger
         var added = 0
         do {
@@ -376,6 +377,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard deliveryDraftIsValid, let fill = currentFill, visits.indices.contains(selectedVisit), visits[selectedVisit].fills.indices.contains(selectedFill) else { message = "Delivery not committed: invalid draft."; return }
         let before = confirmedLitres
         let now = Date()
+        let operationID = nextOperationID("delivery")
         var candidate = cargoLedger
         var delivered = 0
         do {
@@ -397,6 +399,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard compartments.indices.contains(from), compartments.indices.contains(to), from != to, litres > 0 else { message = "Transfer not committed: invalid input."; return }
         guard compartments[from].product == compartments[to].product else { message = "Transfer not committed: product mismatch."; return }
         let now = Date()
+        let operationID = nextOperationID("transfer")
         var candidate = cargoLedger
         do {
             try candidate.append(CargoTransaction(kind: .transfer, cargo: cargo(for: compartments[from].product), units: Double(litres), sourceCompartmentID: compartments[from].cargoCompartmentID, destinationCompartmentID: compartments[to].cargoCompartmentID, occurredAt: now, recordedAt: now, provenance: .driverEntered, note: operationID), reconciliationLog: reconciliationLog)
