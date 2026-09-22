@@ -79,6 +79,9 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 if let fatigue = store.dailyFatigue(asOf: fatigueTick) {
                     Text("Driver \(fatigue.openKind?.rawValue.uppercased() ?? "OFF") · \(Int(fatigue.workSeconds / 60))m work today")
                         .font(.caption2)
+                    if store.standardHours(asOf: fatigueTick)?.historyUncertain == true {
+                        Text("Policy history uncertain").font(.caption2).foregroundStyle(.orange)
+                    }
                 } else {
                     Text("Driver ledger unavailable").font(.caption2).foregroundStyle(.red)
                 }
