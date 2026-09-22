@@ -27,6 +27,8 @@ public struct Chunk5FRunView: View {
     @State private var editFillName = ""
     @State private var editFillProduct = "XLS"
     @State private var editFillPlanned = 0
+    @State private var editRunItemIndex: Int? = nil
+    @State private var editRunItemTitle = ""
 
     public init(store: Chunk5FPrototypeStore, subdued: Bool = false) {
         self.store = store; self.subdued = subdued
@@ -56,6 +58,8 @@ public struct Chunk5FRunView: View {
                     .buttonStyle(.bordered)
                     Button("ADD TERMINAL") { store.addTerminalLoad() }
                         .buttonStyle(.bordered)
+                    Button("ADD REST") { store.addPlannedRest() }.buttonStyle(.bordered)
+                    Button("ADD OTHER WORK") { store.addPlannedOtherWork() }.buttonStyle(.bordered)
                 }
                 .font(.caption)
 
@@ -67,79 +71,47 @@ public struct Chunk5FRunView: View {
                    store.visits[vi].fills.indices.contains(fi) {
                     editFillEditor(visitIndex: vi, fillIndex: fi)
                 }
+                if let index = editRunItemIndex, store.runItems.indices.contains(index) {
+                    HStack {
+                        TextField("Run item", text: $editRunItemTitle).textFieldStyle(.roundedBorder)
+                        Button("SAVE") { store.updateRunItem(at: index, title: editRunItemTitle); editRunItemIndex = nil }.buttonStyle(.borderedProminent)
+                        Button("CANCEL") { editRunItemIndex = nil }
+                    }.font(.caption)
+                }
             }
 
             List {
-                ForEach(Array(store.visits.enumerated()), id: \.element.id) { index, visit in
+                ForEach(Array(store.runItems.enumerated()), id: \.element.id) { runIndex, item in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text(visit.isComplete ? "✓" : (visit.isTerminalLoad ? "T" : "○"))
-                            Text(visit.isTerminalLoad ? "TERMINAL / LOAD" : "\(visit.customer) — \(visit.site)")
-                                .bold()
+                            Text(item.isSatisfied ? "✓" : (item.hasCommittedExecution ? "→" : icon(for: item.kind)))
+                            Text(item.title).bold()
                             Spacer()
-                            Text(visit.requestedTime ?? visit.projectedTime)
-                            if store.canMutateRemainingPlan && !visit.isComplete && !visit.fills.contains(where: { $0.completed }) {
-                                Button {
-                                    editVisitIndex = index
-                                    editCustomer = visit.customer
-                                    editSite = visit.site
-                                    showAddEditor = false
-                                    addFillVisitIndex = nil
-                                    editFillVisitIndex = nil
-                                } label: {
-                                    Image(systemName: "pencil").font(.caption)
-                                }
-                                .buttonStyle(.plain)
-                                Button(role: .destructive) {
-                                    store.removeVisit(at: index)
-                                } label: {
-                                    Image(systemName: "trash").font(.caption)
-                                }
-                                .buttonStyle(.plain)
+                            Text(item.requestedTime ?? "—")
+                            if store.canMutateRemainingPlan && !item.hasCommittedExecution {
+                                if item.kind != .siteVisit { Button { editRunItemIndex = runIndex; editRunItemTitle = item.title } label: { Image(systemName: "pencil").font(.caption) }.buttonStyle(.plain) }
+                                Button(role: .destructive) { store.removeRunItem(at: runIndex) } label: { Image(systemName: "trash").font(.caption) }.buttonStyle(.plain)
                             }
                         }
-                        if !visit.isTerminalLoad {
-                            Text("\(visit.plannedLitres.formatted()) L • \(visit.fills.count) fill\(visit.fills.count == 1 ? "" : "s")")
-                                .font(.caption)
+                        if let visitIndex = store.visitIndex(for: item), store.visits.indices.contains(visitIndex) {
+                            let visit = store.visits[visitIndex]
+                            HStack {
+                                Text("\(visit.plannedLitres.formatted()) L • \(visit.fills.count) fill\(visit.fills.count == 1 ? "" : "s")").font(.caption)
+                                if store.canMutateRemainingPlan && !visit.fills.contains(where: { $0.completed }) {
+                                    Button { editVisitIndex = visitIndex; editCustomer = visit.customer; editSite = visit.site; showAddEditor = false } label: { Image(systemName: "pencil").font(.caption) }.buttonStyle(.plain)
+                                }
+                            }
                             ForEach(Array(visit.fills.enumerated()), id: \.element.id) { fillIndex, fill in
                                 HStack {
-                                    Text("  \(fill.completed ? "✓" : "•") \(fill.name)  \(fill.plannedLitres.formatted()) L \(fill.product)")
-                                        .font(.caption2)
-                                    Spacer()
-                                    if store.canMutateRemainingPlan && !fill.completed {
-                                        Button {
-                                            editFillVisitIndex = index
-                                            editFillIndex = fillIndex
-                                            editFillName = fill.name
-                                            editFillProduct = fill.product
-                                            editFillPlanned = fill.plannedLitres
-                                            showAddEditor = false
-                                            addFillVisitIndex = nil
-                                            editVisitIndex = nil
-                                        } label: {
-                                            Image(systemName: "pencil").font(.caption2)
-                                        }
-                                        .buttonStyle(.plain)
-                                        if visit.fills.count > 1 {
-                                            Button(role: .destructive) {
-                                                store.removeFill(visitIndex: index, fillIndex: fillIndex)
-                                            } label: {
-                                                Image(systemName: "minus.circle").font(.caption2)
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
+                                    Text("  \(fill.completed ? "✓" : "•") \(fill.name)  \(fill.plannedLitres.formatted()) L \(fill.product)").font(.caption2)
+                                    if store.canMutateRemainingPlan && !visit.fills.contains(where: { $0.completed }) {
+                                        Button { editFillVisitIndex = visitIndex; editFillIndex = fillIndex; editFillName = fill.name; editFillProduct = fill.product; editFillPlanned = fill.plannedLitres; showAddEditor = false } label: { Image(systemName: "pencil").font(.caption2) }.buttonStyle(.plain)
+                                        if visit.fills.count > 1 { Button(role: .destructive) { store.removeFill(visitIndex: visitIndex, fillIndex: fillIndex) } label: { Image(systemName: "minus.circle").font(.caption2) }.buttonStyle(.plain) }
                                     }
                                 }
                             }
-                            if store.canMutateRemainingPlan && !visit.isComplete {
-                                Button("ADD FILL") {
-                                    addFillVisitIndex = index
-                                    showAddEditor = false
-                                    editVisitIndex = nil
-                                    editFillVisitIndex = nil
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.bordered)
+                            if store.canMutateRemainingPlan && !visit.fills.contains(where: { $0.completed }) {
+                                Button("ADD FILL") { addFillVisitIndex = visitIndex; showAddEditor = false }.font(.caption2).buttonStyle(.bordered)
                             }
                         }
                     }
@@ -148,16 +120,12 @@ public struct Chunk5FRunView: View {
                     .onTapGesture {
                         guard store.workspace == .active,
                               store.canOpenOperationalWorkspace,
-                              !visit.isComplete else { return }
-                        if visit.isTerminalLoad {
-                            store.openLoad(visitIndex: index)
-                        } else {
-                            store.openSite(index)
-                        }
+                              !item.isSatisfied else { return }
+                        store.openRunItem(at: runIndex)
                     }
                 }
                 .onMove { source, destination in
-                    store.moveVisit(from: source, to: destination)
+                    store.moveRunItem(from: source, to: destination)
                 }
                 .moveDisabled(!store.canReorderRun || store.workspace == .rest)
             }
@@ -165,6 +133,10 @@ public struct Chunk5FRunView: View {
             .environment(\.editMode, .constant(store.canReorderRun && (store.workspace == .active || store.workspace == .preShift) ? .active : .inactive))
         }
         .opacity(subdued ? 0.48 : 1)
+    }
+
+    private func icon(for kind: Chunk5FRunItemKind) -> String {
+        switch kind { case .siteVisit: return "○"; case .terminalLoad: return "T"; case .plannedRest: return "R"; case .plannedOtherWork: return "W" }
     }
 
     // MARK: - Editors
