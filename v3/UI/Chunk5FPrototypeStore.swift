@@ -614,6 +614,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     public func commitCorrection(eventID: UUID, correctedLitres: Int, compartment index: Int, note: String) {
         guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
+        guard workspace == .active else { message = "Correction is available only while working in Active."; return }
         guard compartments.indices.contains(index),
               let originalEvent = eventLog.first(where: { $0.id == eventID }),
               let operationID = originalEvent.relatedOperationID,
@@ -760,6 +761,16 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }.joined(separator: "||")
     }
 
+    /// Legacy v3 snapshots did not protect this counter. Add it only when a
+    /// Field Test 02 structured event is present so those snapshots remain
+    /// replay-compatible while new exception consequences cannot be zeroed.
+    private func exceptionConsequenceFingerprint(events: [Chunk5GEvent], unresolvedDiscrepancies: Int) -> String {
+        let hasStructuredException = events.contains {
+            $0.transactionVariance != nil || $0.physicalCheck != nil || $0.inputCorrection != nil
+        }
+        return hasStructuredException ? "##exceptions:unresolved=\(unresolvedDiscrepancies)" : ""
+    }
+
     private func authoritativeFingerprint() -> String {
         let cargo = confirmedLitres.map(String.init).joined(separator: ",")
         let run = visits.map { v in
@@ -767,7 +778,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
         let history = historyFingerprint(events: eventLog, ledger: cargoLedger, reconciliationLog: reconciliationLog)
-        return cargo + "##" + run + "##" + history
+        return cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: eventLog, unresolvedDiscrepancies: unresolvedDiscrepancies)
     }
 
     public func persistLiveSnapshot() {
@@ -932,7 +943,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
         let history = historyFingerprint(events: s.eventLog, ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog)
-        guard cargo + "##" + run + "##" + history == s.authoritativeFingerprint else {
+        let expectedFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: s.eventLog, unresolvedDiscrepancies: s.unresolvedDiscrepancies)
+        guard expectedFingerprint == s.authoritativeFingerprint else {
             throw CocoaError(.coderReadCorrupt)
         }
     }
@@ -955,7 +967,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         persistenceDefaults.set(data, forKey: Self.completedPersistenceKey)
     }
 
-    private func reconciliationsRepresented(events: [Chunk5GEvent], log: CargoReconciliationLog) -> Bool {
+    func reconciliationsRepresented(events: [Chunk5GEvent], log: CargoReconciliationLog) -> Bool {
         let expected = log.events.filter { $0.note != "chunk5g.opening.baseline" }
         var linked = Set<CanonicalID>()
         for event in events {
@@ -965,7 +977,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             }
         }
         let expectedIDs = Set(expected.map(\.id))
-        let legacyCount = events.filter { $0.kind == .reconciliation }.count
+        let legacyCount = events.filter {
+            $0.kind == .reconciliation || ($0.kind == .correction && $0.inputCorrection == nil)
+        }.count
         return linked.isSubset(of: expectedIDs) && expected.count == linked.count + legacyCount
     }
 
@@ -1007,7 +1021,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         visits: [Chunk5FSiteVisit],
         eventLog: [Chunk5GEvent],
         ledger: CargoLedger,
-        reconciliationLog: CargoReconciliationLog
+        reconciliationLog: CargoReconciliationLog,
+        unresolvedDiscrepancies: Int
     ) throws -> String {
         let cargo = try compartments.map { c -> String in
             let state = try CargoStateReconciler.currentState(
@@ -1022,7 +1037,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
         let history = historyFingerprint(events: eventLog, ledger: ledger, reconciliationLog: reconciliationLog)
-        return cargo + "##" + run + "##" + history
+        return cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: eventLog, unresolvedDiscrepancies: unresolvedDiscrepancies)
     }
 
     /// Converts the former active-shift envelope without installing it into live state.
@@ -1046,7 +1061,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             visits: old.visits,
             eventLog: old.eventLog,
             ledger: old.cargoLedger,
-            reconciliationLog: old.reconciliationLog
+            reconciliationLog: old.reconciliationLog,
+            unresolvedDiscrepancies: old.unresolvedDiscrepancies
         )
         let migrated = Chunk5GLiveSnapshot(
             evidenceSource: old.evidenceSource,
