@@ -14,7 +14,7 @@ Close only the remaining field-harness gaps: explicit mixed Run planning, a deli
 
 - Today's Run has explicit `siteVisit`, `terminalLoad`, `plannedRest`, and `plannedOtherWork` items. Rest/Other Work planning emits only `planChange`; actual Rest remains Start/End truth and planned Other Work uses the existing generic `workRest`/WORK anchor.
 - Terminal, Rest, and Other Work items do not manufacture visits, fills, or cargo.
-- Remaining items can be edited/reordered/removed; executed items are locked.
+- Remaining items can be edited/reordered/removed; executed and partial items stay anchored in their existing Run slots. SwiftUI moves are projected onto only the mutable subsequence, so future rows on either side can reorder without shifting committed rows; rejected/no-effect moves create no history or persistence write.
 - Execution lock and satisfaction are distinct: the first completed fill establishes the durable Run-item → event lock, while a Site is satisfied only after every fill is complete. Partial Sites remain current/reopenable.
 - Old snapshots without Run items normalize completed/partial Sites and retained Terminal rows into an explicit compatibility state without inventing operational events; selected indices are remapped when terminal rows are removed from the Site collection. A recovered legacy `Load` workspace returns to Active and requires the driver to reopen its retained Terminal item explicitly.
 - 0 L is a separate confirmed outcome requiring an unchanged draft and a trimmed 1–120 character reason. It retains run/site/fill identity and planned litres, advances the run, creates no cargo/reconciliation, and cannot enter Correction.

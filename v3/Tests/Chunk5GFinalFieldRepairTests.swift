@@ -29,6 +29,58 @@ public enum Chunk5GFinalFieldRepairTests {
             check("Other Work ends through generic WORK anchor", plan.workspace == .active && plan.eventLog.last?.kind == .workRest)
         } else { results.append("Other Work is a narrow current context: FAIL") }
 
+        let reorderSuite = "chunk5g.anchored.reorder.\(UUID().uuidString)"
+        if let reorderDefaults = UserDefaults(suiteName: reorderSuite) {
+            defer { reorderDefaults.removePersistentDomain(forName: reorderSuite) }
+            let anchored = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: reorderDefaults)
+            anchored.draftOpeningODO = 800_000; anchored.acceptOpeningBaseline()
+            anchored.addSiteVisit(customer: "A", site: "FUTURE", fillName: "A fill", product: "XLS", plannedLitres: 100)
+            anchored.addPlannedRest()
+            anchored.addTerminalLoad()
+            anchored.startShift()
+            let executedID = anchored.runItems[1].id
+            anchored.openRunItem(at: 1); anchored.endRest()
+            let originalOrder = anchored.runItems.map(\.id)
+            let historyBeforeRejectedMoves = anchored.eventLog.count
+            anchored.moveRunItem(from: IndexSet(integer: 1), to: anchored.runItems.count)
+            check("Executed middle Run row cannot move", anchored.runItems.map(\.id) == originalOrder && anchored.eventLog.count == historyBeforeRejectedMoves)
+            anchored.moveRunItem(from: IndexSet([0, 1]), to: anchored.runItems.count)
+            check("Mixed mutable/committed Run selection is a no-op", anchored.runItems.map(\.id) == originalOrder && anchored.eventLog.count == historyBeforeRejectedMoves)
+            anchored.moveRunItem(from: IndexSet(integer: 99), to: 0)
+            anchored.moveRunItem(from: IndexSet(integer: 0), to: anchored.runItems.count + 1)
+            check("Invalid Run moves are rejected without history", anchored.runItems.map(\.id) == originalOrder && anchored.eventLog.count == historyBeforeRejectedMoves)
+            anchored.moveRunItem(from: IndexSet(integer: 0), to: 2)
+            check("Drop across anchor without mutable-order change emits nothing", anchored.runItems.map(\.id) == originalOrder && anchored.eventLog.count == historyBeforeRejectedMoves)
+            let historyBeforeAnchoredMove = anchored.eventLog.count
+            anchored.moveRunItem(from: IndexSet(integer: 0), to: anchored.runItems.count)
+            let reorderedIDs = anchored.runItems.map(\.id)
+            check("Future rows reorder across an anchored executed row", reorderedIDs == [originalOrder[2], executedID, originalOrder[0]] && anchored.eventLog.count == historyBeforeAnchoredMove + 1 && anchored.eventLog.last?.kind == .planChange)
+            let relaunchedOrder = Chunk5FPrototypeStore(recoveringFrom: reorderDefaults)
+            check("Anchored mutable Run order survives relaunch", relaunchedOrder.persistenceStatus == .pass && relaunchedOrder.runItems.map(\.id) == reorderedIDs && relaunchedOrder.runItems[1].id == executedID)
+        } else { results.append("Anchored Run reorder persistence suite: FAIL") }
+
+        let partialAnchor = Chunk5FPrototypeStore(evidenceSource: .fixture)
+        partialAnchor.addPlannedRest()
+        partialAnchor.moveRunItem(from: IndexSet(integer: 2), to: 0)
+        partialAnchor.startShift(); partialAnchor.openRunItem(at: 1)
+        partialAnchor.setDraft(compartment: 3, litres: 0); partialAnchor.setDraft(compartment: 4, litres: 5_400)
+        partialAnchor.commitDelivery(); partialAnchor.returnToActive()
+        let partialID = partialAnchor.runItems[1].id
+        let partialOriginal = partialAnchor.runItems.map(\.id)
+        partialAnchor.moveRunItem(from: IndexSet(integer: 0), to: partialAnchor.runItems.count)
+        check("Future rows reorder around anchored partial Site", partialAnchor.runItems.map(\.id) == [partialOriginal[2], partialID, partialOriginal[0]] && partialAnchor.runItems[1].hasCommittedExecution && !partialAnchor.runItems[1].isSatisfied)
+        partialAnchor.setPrototypeMoving(true)
+        let movingOrder = partialAnchor.runItems.map(\.id)
+        let movingHistory = partialAnchor.eventLog.count
+        partialAnchor.moveRunItem(from: IndexSet(integer: 0), to: partialAnchor.runItems.count)
+        check("Moving restraint blocks anchored-subsequence reorder", partialAnchor.runItems.map(\.id) == movingOrder && partialAnchor.eventLog.count == movingHistory)
+
+        let allFuture = Chunk5FPrototypeStore(evidenceSource: .fixture)
+        let allFutureFirst = allFuture.runItems[0].id
+        let allFutureHistory = allFuture.eventLog.count
+        allFuture.moveRunItem(from: IndexSet(integer: 0), to: allFuture.runItems.count)
+        check("All-future Run reorder remains supported", allFuture.runItems.last?.id == allFutureFirst && allFuture.eventLog.count == allFutureHistory + 1)
+
         let zero = Chunk5FPrototypeStore(evidenceSource: .fixture)
         zero.startShift(); zero.openRunItem(at: 0)
         let ledgerBefore = zero.cargoLedger.transactions.count

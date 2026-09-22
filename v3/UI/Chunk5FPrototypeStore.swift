@@ -484,7 +484,26 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func removeVisit(at index: Int) { guard canMutateRemainingPlan, visits.indices.contains(index), !visits[index].fills.contains(where: \.completed) else { return }; let removed=visits.remove(at:index); runItems.removeAll { $0.siteVisitID == removed.id }; appendEvent(.planChange, "Removed site visit", "\(removed.customer) — \(removed.site)"); persistPlanMutation() }
     public func removeFill(visitIndex: Int, fillIndex: Int) { guard canMutateRemainingPlan, visits.indices.contains(visitIndex), visits[visitIndex].fills.indices.contains(fillIndex), !visits[visitIndex].fills.contains(where: \.completed), visits[visitIndex].fills.count > 1 else { return }; let removed=visits[visitIndex].fills.remove(at:fillIndex); appendEvent(.planChange, "Removed fill", removed.name); persistPlanMutation() }
     public func moveVisit(from source: IndexSet, to destination: Int) { guard canReorderRun, source.allSatisfy({ visits.indices.contains($0) && !visits[$0].fills.contains(where: \.completed) }) else { return }; visits.move(fromOffsets: source, toOffset: destination); appendEvent(.planChange, "Reordered remaining run"); persistPlanMutation() }
-    public func moveRunItem(from source: IndexSet, to destination: Int) { let historyBoundary = (runItems.lastIndex(where: \.hasCommittedExecution) ?? -1) + 1; guard canReorderRun, destination >= historyBoundary, source.allSatisfy({ runItems.indices.contains($0) && $0 >= historyBoundary && !runItems[$0].hasCommittedExecution }) else { return }; runItems.move(fromOffsets: source, toOffset: destination); appendEvent(.planChange, "Reordered remaining run"); persistPlanMutation() }
+    public func moveRunItem(from source: IndexSet, to destination: Int) {
+        guard canReorderRun, !source.isEmpty, (0...runItems.count).contains(destination),
+              source.allSatisfy({ runItems.indices.contains($0) && !runItems[$0].hasCommittedExecution }) else { return }
+
+        // SwiftUI reports source/destination in full-list coordinates. Project
+        // that move to the mutable subsequence, then write it back only through
+        // mutable slots so every committed or partial row stays anchored.
+        var projected = runItems
+        projected.move(fromOffsets: source, toOffset: destination)
+        let reorderedMutableItems = projected.filter { !$0.hasCommittedExecution }
+        let mutableSlots = runItems.indices.filter { !runItems[$0].hasCommittedExecution }
+        guard reorderedMutableItems.count == mutableSlots.count else { return }
+
+        var candidate = runItems
+        for (slot, item) in zip(mutableSlots, reorderedMutableItems) { candidate[slot] = item }
+        guard candidate != runItems else { return }
+        runItems = candidate
+        appendEvent(.planChange, "Reordered remaining run")
+        persistPlanMutation()
+    }
     public func updateRunItem(at index: Int, title: String, requestedTime: String? = nil) { guard canMutateRemainingPlan, runItems.indices.contains(index), !runItems[index].hasCommittedExecution else { return }; let clean = title.trimmingCharacters(in: .whitespacesAndNewlines); guard !clean.isEmpty else { return }; runItems[index].title = clean; runItems[index].requestedTime = requestedTime?.trimmingCharacters(in: .whitespacesAndNewlines); appendEvent(.planChange, "Updated planned \(runItems[index].kind.rawValue)", clean); persistPlanMutation() }
     public func removeRunItem(at index: Int) { guard canMutateRemainingPlan, runItems.indices.contains(index), !runItems[index].hasCommittedExecution else { return }; let item = runItems.remove(at: index); if let visitID = item.siteVisitID, let vi = visits.firstIndex(where: { $0.id == visitID && !$0.fills.contains(where: \.completed) }) { visits.remove(at: vi) }; appendEvent(.planChange, "Removed planned \(item.kind.rawValue)", item.title); persistPlanMutation() }
     public func visitIndex(for item: Chunk5FRunItem) -> Int? { item.siteVisitID.flatMap { id in visits.firstIndex(where: { $0.id == id }) } }
