@@ -154,7 +154,11 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func standardHours(asOf now: Date = Date()) -> StandardHoursPolicySnapshot? {
         guard let ledger = driverLedger else { return nil }
         let entries = ledger.allEntries()
-        let historyUncertain = entries.first.map { $0.start > now.addingTimeInterval(-14 * 24 * 3600) } ?? true
+        let gaps = zip(entries, entries.dropFirst()).contains { pair in
+            guard let end = pair.0.end else { return true }
+            return pair.1.start > end
+        }
+        let historyUncertain = (entries.first.map { $0.start > now.addingTimeInterval(-14 * 24 * 3600) } ?? true) || gaps
         return StandardHoursPolicy.evaluate(entries: entries, asOf: now, historyUncertain: historyUncertain)
     }
 
