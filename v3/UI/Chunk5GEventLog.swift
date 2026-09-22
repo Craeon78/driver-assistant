@@ -1,5 +1,60 @@
 import Foundation
 
+public struct Chunk5GCompartmentAdjustment: Codable, Sendable, Equatable {
+    public let compartmentIndex: Int
+    public let deltaLitres: Int
+    public init(compartmentIndex: Int, deltaLitres: Int) {
+        self.compartmentIndex = compartmentIndex; self.deltaLitres = deltaLitres
+    }
+}
+
+public struct Chunk5GTransactionVariance: Codable, Sendable, Equatable {
+    public let calculatedLitres: Int
+    public let actualLitres: Int
+    public let varianceLitres: Int
+    public let postTransactionEmpty: Bool?
+    public let reconciliationEventIDs: [CanonicalID]
+    public let provenance: EventProvenance
+    public let note: String?
+    public init(calculatedLitres: Int, actualLitres: Int, postTransactionEmpty: Bool?, reconciliationEventIDs: [CanonicalID] = [], provenance: EventProvenance = .driverEntered, note: String? = nil) {
+        self.calculatedLitres = calculatedLitres; self.actualLitres = actualLitres
+        self.varianceLitres = actualLitres - calculatedLitres
+        self.postTransactionEmpty = postTransactionEmpty; self.reconciliationEventIDs = reconciliationEventIDs
+        self.provenance = provenance; self.note = note
+    }
+}
+
+public struct Chunk5GPhysicalCheck: Codable, Sendable, Equatable {
+    public let compartmentIndex: Int
+    public let calculatedLitres: Int
+    public let observedLitres: Int
+    public let differenceLitres: Int
+    public let reconciliationEventID: CanonicalID
+    public let provenance: EventProvenance
+    public let note: String?
+    public init(compartmentIndex: Int, calculatedLitres: Int, observedLitres: Int, reconciliationEventID: CanonicalID, provenance: EventProvenance = .driverEntered, note: String? = nil) {
+        self.compartmentIndex = compartmentIndex; self.calculatedLitres = calculatedLitres
+        self.observedLitres = observedLitres; self.differenceLitres = observedLitres - calculatedLitres
+        self.reconciliationEventID = reconciliationEventID; self.provenance = provenance; self.note = note
+    }
+}
+
+public struct Chunk5GInputCorrection: Codable, Sendable, Equatable {
+    public let originalEventID: UUID
+    public let originalLitres: Int
+    public let correctedLitres: Int
+    public let deltaLitres: Int
+    public let compartmentAdjustments: [Chunk5GCompartmentAdjustment]
+    public let correctionTransactionIDs: [CanonicalID]
+    public let provenance: EventProvenance
+    public let note: String?
+    public init(originalEventID: UUID, originalLitres: Int, correctedLitres: Int, compartmentAdjustments: [Chunk5GCompartmentAdjustment], correctionTransactionIDs: [CanonicalID], provenance: EventProvenance = .driverEntered, note: String? = nil) {
+        self.originalEventID = originalEventID; self.originalLitres = originalLitres; self.correctedLitres = correctedLitres
+        self.deltaLitres = correctedLitres - originalLitres; self.compartmentAdjustments = compartmentAdjustments
+        self.correctionTransactionIDs = correctionTransactionIDs; self.provenance = provenance; self.note = note
+    }
+}
+
 /// Minimal chronological event for 5G reconstruction (Slice F) and Gate Report (Slice G).
 public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
@@ -7,20 +62,28 @@ public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
     public let kind: Kind
     public let summary: String
     public let detail: String
+    public let relatedOperationID: String?
+    public let committedLitres: Int?
+    public let transactionVariance: Chunk5GTransactionVariance?
+    public let physicalCheck: Chunk5GPhysicalCheck?
+    public let inputCorrection: Chunk5GInputCorrection?
 
     public enum Kind: String, Codable, Sendable {
         case shiftStart, shiftEnd
         case load, delivery, transfer, reconciliation
+        case transactionVariance, physicalCheck
         case correction
-        case workRest
+        case workRest, restStart, restEnd
         case planChange
         case cargoBaseline
         case relaunch
     }
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), kind: Kind, summary: String, detail: String = "") {
+    public init(id: UUID = UUID(), timestamp: Date = Date(), kind: Kind, summary: String, detail: String = "", relatedOperationID: String? = nil, committedLitres: Int? = nil, transactionVariance: Chunk5GTransactionVariance? = nil, physicalCheck: Chunk5GPhysicalCheck? = nil, inputCorrection: Chunk5GInputCorrection? = nil) {
         self.id = id; self.timestamp = timestamp; self.kind = kind
         self.summary = summary; self.detail = detail
+        self.relatedOperationID = relatedOperationID; self.committedLitres = committedLitres
+        self.transactionVariance = transactionVariance; self.physicalCheck = physicalCheck; self.inputCorrection = inputCorrection
     }
 }
 
@@ -50,6 +113,8 @@ public struct Chunk5GGateReport: Equatable, Sendable {
     public var cargoArithmeticOK: Bool
     public var odoAnchorsOK: Bool
     public var persistenceStatus: Chunk5GCheckStatus
+    public var representationIntegrityStatus: Chunk5GCheckStatus
+    public var operationalCompletenessStatus: Chunk5GCheckStatus
     public var plannedDeliveries: Int
     public var completedPlannedDeliveries: Int
 
@@ -64,6 +129,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         loadsRepresented: Bool = true, deliveriesRepresented: Bool = true,
         transfersRepresented: Bool = true, reconciliationsRepresented: Bool = true,
         cargoArithmeticOK: Bool = true, odoAnchorsOK: Bool = true, persistenceStatus: Chunk5GCheckStatus = .notTested,
+        representationIntegrityStatus: Chunk5GCheckStatus = .notTested, operationalCompletenessStatus: Chunk5GCheckStatus = .notTested,
         plannedDeliveries: Int = 0, completedPlannedDeliveries: Int = 0
     ) {
         self.shiftStart = shiftStart; self.shiftEnd = shiftEnd
@@ -74,6 +140,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         self.loadsRepresented = loadsRepresented; self.deliveriesRepresented = deliveriesRepresented
         self.transfersRepresented = transfersRepresented; self.reconciliationsRepresented = reconciliationsRepresented
         self.cargoArithmeticOK = cargoArithmeticOK; self.odoAnchorsOK = odoAnchorsOK; self.persistenceStatus = persistenceStatus
+        self.representationIntegrityStatus = representationIntegrityStatus; self.operationalCompletenessStatus = operationalCompletenessStatus
         self.plannedDeliveries = plannedDeliveries; self.completedPlannedDeliveries = completedPlannedDeliveries
     }
 }
