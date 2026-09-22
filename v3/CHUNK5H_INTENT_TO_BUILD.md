@@ -10,15 +10,15 @@ Prove that already-passed Driver, Operations/Vehicle, Run, Cargo/Fuel, ODO and p
 
 ## Construction limit
 
-Build one deterministic cross-system preflight/regression fixture and its Playgrounds runner. Reuse the existing live `Chunk5FAdaptiveWorkspaceView` for the field shift. Repair only demonstrated integration defects within this boundary, through the normal review/PR loop. No fixture event is field evidence.
+Build one deterministic cross-system preflight/regression fixture and its Playgrounds runner. The PR #40 review exposed a genuine integration defect: the live 5G workspace emitted Work/Rest events without feeding the canonical Driver ledger. Wire its shift and Rest boundaries to `WorkRestLedger`, derive the live fatigue readout from that ledger, and lock rather than guess when the durable ledger and shift snapshot disagree after interruption. Other Work and cargo activity remain within Work. No fixture event is field evidence.
 
 ## Checks
 
 - Planning Rest and Other Work creates only plan context; actual actions create Work/Rest anchors.
 - Load, positive Delivery and 0 L outcome coexist while cargo activity remains Work; 0 L has no cargo movement.
-- Committed Run items remain anchored when future intent changes.
+- Future intent crosses committed positions while each committed Run item retains its exact index.
 - Transfer and Physical Check retain their distinct provenance.
-- Mid-shift relaunch preserves event identities, Run order and cargo without duplication.
+- Mid-shift relaunch preserves event identities, Run order, cargo and canonical Driver intervals without duplication.
 - End Shift archives ODO and chronological history; internal representation and operational completeness remain separate.
 
 The preflight may exercise an exception even when the field shift does not naturally contain one. A preflight PASS cannot pass 5H.
