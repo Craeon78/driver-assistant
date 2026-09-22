@@ -18,6 +18,8 @@
 
 If the Playgrounds master predates PR #39, this delta is insufficient: sync the current `main` V3 sources first, including the `CocoaError(.fileWriteUnknown)` compile fix. Niles must verify the final delta against the actual merged candidate.
 
+**Before importing:** finish and archive any active 5G shift. An older mid-shift snapshot has no canonical Driver intervals; 5H must not silently invent past Work/Rest on upgrade. Begin the field gate from a fresh `READY TO START` state.
+
 ## Temporary preflight ContentView
 
 If local `ContentView.swift` still points to the 5G final-field runner, temporarily replace its content with the following complete view for the preflight only:
