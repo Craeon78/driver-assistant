@@ -530,7 +530,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     private func recordTransactionVarianceIfRequired(calculatedLitres: Int, actualLitres: Int?, postTransactionEmpty: Bool?, operationID: String, note: String) throws {
-        guard let actualLitres, actualLitres > 0, actualLitres != calculatedLitres else { return }
+        guard let actualLitres, actualLitres > 0 else { return }
         let variance = actualLitres - calculatedLitres
         var reconciliationIDs: [CanonicalID] = []
 
@@ -543,13 +543,13 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             var varianceAttached = false
             for index in eligible {
                 let calculated = confirmedLitres[index]
-                guard calculated > 0 || (!varianceAttached && index == first) else { continue }
+                guard calculated > 0 else { continue }
                 let event = CargoReconciliationEvent(
                     compartmentID: compartments[index].cargoCompartmentID,
                     cargo: cargo(for: compartments[index].product),
                     calculatedUnitsBefore: Double(calculated),
                     confirmedPhysicalUnitsAfter: 0,
-                    observedMovementVariance: varianceAttached ? nil : Double(variance),
+                    observedMovementVariance: !varianceAttached && variance != 0 ? Double(variance) : nil,
                     occurredAt: Date().addingTimeInterval(0.001 + Double(reconciliationIDs.count) * 0.001),
                     recordedAt: Date(),
                     provenance: .driverEntered,
@@ -558,9 +558,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 )
                 try reconciliationLog.append(event)
                 reconciliationIDs.append(event.id)
-                varianceAttached = true
+                if variance != 0 { varianceAttached = true }
             }
-            if !varianceAttached {
+            if variance != 0 && !varianceAttached {
                 let event = CargoReconciliationEvent(
                     compartmentID: compartments[first].cargoCompartmentID,
                     cargo: cargo(for: compartments[first].product),
@@ -575,7 +575,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 )
                 try reconciliationLog.append(event); reconciliationIDs.append(event.id)
             }
-        } else {
+        } else if variance != 0 {
             unresolvedDiscrepancies += 1
         }
 
@@ -589,7 +589,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         )
         appendEvent(
             .transactionVariance,
-            "Transaction variance \(variance >= 0 ? "+" : "")\(variance) L",
+            variance == 0 ? "Transaction evidence — totals match" : "Transaction variance \(variance >= 0 ? "+" : "")\(variance) L",
             "calculated \(calculatedLitres) L; actual \(actualLitres) L",
             relatedOperationID: operationID,
             committedLitres: actualLitres,
@@ -639,25 +639,28 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             message = "Correction not committed: compartment adjustment would be zero or negative."; return
         }
         let now = Date()
+        // A correction is learned now but supersedes the original movement at
+        // its historical position. This prevents a corrected Load from
+        // requiring all originally loaded cargo to remain on board.
+        let replayTime = target.occurredAt.addingTimeInterval(0.000001)
         let correctionOperationID = nextOperationID("correction")
         let reversal = CargoTransaction(
             kind: .correction, cargo: target.cargo, units: target.units,
             sourceCompartmentID: target.destinationCompartmentID,
             destinationCompartmentID: target.sourceCompartmentID,
-            occurredAt: now, recordedAt: now, provenance: .corrected,
+            occurredAt: replayTime, recordedAt: now, provenance: .corrected,
             correctsTransactionID: target.id, note: correctionOperationID
         )
         let replacement = CargoTransaction(
             kind: target.kind, cargo: target.cargo, units: Double(replacementUnits),
             sourceCompartmentID: target.sourceCompartmentID,
             destinationCompartmentID: target.destinationCompartmentID,
-            occurredAt: now.addingTimeInterval(0.001), recordedAt: now,
+            occurredAt: replayTime.addingTimeInterval(0.000001), recordedAt: now,
             provenance: .corrected, note: correctionOperationID
         )
         var candidate = cargoLedger
         do {
-            try candidate.append(reversal, reconciliationLog: reconciliationLog)
-            try candidate.append(replacement, reconciliationLog: reconciliationLog)
+            try candidate.appendCorrectionPair(reversal: reversal, replacement: replacement, reconciliationLog: reconciliationLog)
             cargoLedger = candidate
             let payload = Chunk5GInputCorrection(
                 originalEventID: originalEvent.id,
@@ -822,7 +825,6 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                       variance.calculatedLitres > 0,
                       variance.actualLitres > 0,
                       variance.varianceLitres == variance.actualLitres - variance.calculatedLitres,
-                      variance.varianceLitres != 0,
                       event.committedLitres == variance.actualLitres,
                       let operationID = event.relatedOperationID,
                       events.contains(where: {
@@ -838,15 +840,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                     return boundary
                 }
                 if variance.postTransactionEmpty == true {
-                    guard !boundaries.isEmpty,
+                    guard (!boundaries.isEmpty || variance.varianceLitres == 0),
                           boundaries.allSatisfy({ abs($0.confirmedPhysicalUnitsAfter) < 0.000001 }),
                           boundaries.allSatisfy({ $0.provenance == variance.provenance }),
                           abs(boundaries.compactMap(\.observedMovementVariance).reduce(0, +) - Double(variance.varianceLitres)) < 0.000001,
-                          boundaries.contains(where: { boundary in
+                          (boundaries.isEmpty && variance.varianceLitres == 0 || boundaries.contains(where: { boundary in
                               guard let id = boundary.relatedCargoTransactionID,
                                     let transaction = transactionByID[id] else { return false }
                               return transaction.note == operationID
-                          }) else { throw CocoaError(.coderReadCorrupt) }
+                          })) else { throw CocoaError(.coderReadCorrupt) }
                 } else {
                     guard boundaries.isEmpty else { throw CocoaError(.coderReadCorrupt) }
                 }
@@ -918,6 +920,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let structuredPayloadCount = [event.transactionVariance != nil, event.physicalCheck != nil, event.inputCorrection != nil].filter { $0 }.count
             guard structuredPayloadCount <= 1 else { throw CocoaError(.coderReadCorrupt) }
         }
+
+        let representedCorrectionIDs = Set(events.compactMap(\.inputCorrection).flatMap(\.correctionTransactionIDs))
+        let ledgerCorrectionIDs = Set(ledger.transactions.filter { $0.note?.hasPrefix("chunk5g.correction.op.") == true }.map(\.id))
+        guard representedCorrectionIDs == ledgerCorrectionIDs else { throw CocoaError(.coderReadCorrupt) }
     }
 
     private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
@@ -983,6 +989,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         return linked.isSubset(of: expectedIDs) && expected.count == linked.count + legacyCount
     }
 
+    func correctionsRepresented(events: [Chunk5GEvent], ledger: CargoLedger) -> Bool {
+        let eventIDs = Set(events.compactMap(\.inputCorrection).flatMap(\.correctionTransactionIDs))
+        let ledgerIDs = Set(ledger.transactions.filter { $0.note?.hasPrefix("chunk5g.correction.op.") == true }.map(\.id))
+        return eventIDs == ledgerIDs
+    }
+
     private func gateReport(fromValidated s: Chunk5GLiveSnapshot, persistenceStatus status: Chunk5GCheckStatus) throws -> Chunk5GGateReport {
         try validate(snapshot: s)
         let cargoClosing = try s.compartments.map { c -> Int in
@@ -996,8 +1008,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let deliveriesRepresented = s.eventLog.filter { $0.kind == .delivery }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .unload && ($0.note?.hasPrefix("chunk5g.delivery.op.") ?? false) }.compactMap(\.note)).count
         let transfersRepresented = s.eventLog.filter { $0.kind == .transfer }.count == Set(s.cargoLedger.transactions.filter { $0.kind == .transfer && ($0.note?.hasPrefix("chunk5g.transfer.op.") ?? false) }.compactMap(\.note)).count
         let reconciliationRepresentation = reconciliationsRepresented(events: s.eventLog, log: s.reconciliationLog)
+        let correctionRepresentation = correctionsRepresented(events: s.eventLog, ledger: s.cargoLedger)
         let odoAnchorsOK = (s.openingODO ?? 0) > 0 && (s.closingODO ?? 0) >= (s.openingODO ?? 0)
-        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation ? .pass : .fail
+        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation ? .pass : .fail
         return Chunk5GGateReport(
             shiftStart: s.shiftStartedAt, shiftEnd: s.shiftEndedAt, openingODO: s.openingODO, closingODO: s.closingODO,
             events: s.eventLog, cargoOpening: s.cargoOpeningSnapshot, cargoClosing: cargoClosing,
@@ -1006,6 +1019,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             deliveriesRepresented: deliveriesRepresented,
             transfersRepresented: transfersRepresented,
             reconciliationsRepresented: reconciliationRepresentation,
+            correctionsRepresented: correctionRepresentation,
             cargoArithmeticOK: arithmeticOK,
             odoAnchorsOK: odoAnchorsOK,
             persistenceStatus: status,
@@ -1173,8 +1187,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let deliveriesRepresented = eventLog.filter { $0.kind == .delivery }.count == Set(cargoLedger.transactions.filter { $0.kind == .unload && ($0.note?.hasPrefix("chunk5g.delivery.op.") ?? false) }.compactMap(\.note)).count
         let transfersRepresented = eventLog.filter { $0.kind == .transfer }.count == Set(cargoLedger.transactions.filter { $0.kind == .transfer && ($0.note?.hasPrefix("chunk5g.transfer.op.") ?? false) }.compactMap(\.note)).count
         let reconciliationRepresentation = reconciliationsRepresented(events: eventLog, log: reconciliationLog)
+        let correctionRepresentation = correctionsRepresented(events: eventLog, ledger: cargoLedger)
         let odoAnchorsOK = (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0)
-        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation ? .pass : .fail
-        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: loadsRepresented, deliveriesRepresented: deliveriesRepresented, transfersRepresented: transfersRepresented, reconciliationsRepresented: reconciliationRepresentation, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: odoAnchorsOK, persistenceStatus: persistenceStatus, representationIntegrityStatus: integrity, operationalCompletenessStatus: .notTested, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
+        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation ? .pass : .fail
+        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: loadsRepresented, deliveriesRepresented: deliveriesRepresented, transfersRepresented: transfersRepresented, reconciliationsRepresented: reconciliationRepresentation, correctionsRepresented: correctionRepresentation, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: odoAnchorsOK, persistenceStatus: persistenceStatus, representationIntegrityStatus: integrity, operationalCompletenessStatus: .notTested, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
     }
 }
