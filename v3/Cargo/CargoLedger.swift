@@ -69,6 +69,53 @@ public struct CargoLedger: Codable, Sendable, Equatable {
         }
     }
 
+    /// Appends the reversal and corrected replacement as one validated replay
+    /// unit. A historical Load correction may otherwise fail while the ledger
+    /// temporarily contains only the reversal and later unloads.
+    public mutating func appendCorrectionPair(
+        reversal: CargoTransaction,
+        replacement: CargoTransaction,
+        reconciliationLog: CargoReconciliationLog
+    ) throws {
+        guard reversal.units > 0, replacement.units > 0 else { throw CargoLedgerError.nonPositiveQuantity }
+        guard reversal.id != replacement.id,
+              !transactions.contains(where: { $0.id == reversal.id || $0.id == replacement.id }) else {
+            throw CargoLedgerError.duplicateTransactionID
+        }
+        guard reversal.kind == .correction else { throw CargoLedgerError.invalidEndpoints }
+        try validateShape(reversal)
+        try validateCorrection(reversal)
+        try validateShape(replacement)
+        guard let targetID = reversal.correctsTransactionID,
+              let target = transactions.first(where: { $0.id == targetID }),
+              replacement.kind == target.kind,
+              replacement.cargo == target.cargo,
+              replacement.sourceCompartmentID == target.sourceCompartmentID,
+              replacement.destinationCompartmentID == target.destinationCompartmentID,
+              replacement.correctsTransactionID == nil else {
+            throw CargoLedgerError.invalidEndpoints
+        }
+
+        let previousTransactions = transactions
+        let previousFlag = requiresReconciliationForReplay
+        transactions.append(contentsOf: [reversal, replacement])
+        transactions.sort(by: Self.order)
+        do {
+            if reconciliationLog.events.isEmpty {
+                _ = try Self.project(limits: limits, transactions: transactions)
+            } else {
+                requiresReconciliationForReplay = true
+                for limit in limits {
+                    _ = try CargoStateReconciler.currentState(ledger: self, reconciliationLog: reconciliationLog, compartmentID: limit.compartmentID)
+                }
+            }
+        } catch {
+            transactions = previousTransactions
+            requiresReconciliationForReplay = previousFlag
+            throw error
+        }
+    }
+
     public func state(compartmentID: CanonicalID) throws -> CargoCompartmentState {
         guard !requiresReconciliationForReplay else { throw CargoLedgerError.reconciliationRequired }
         guard limits.contains(where:{$0.compartmentID==compartmentID}) else { throw CargoLedgerError.unknownDestinationCompartment }
