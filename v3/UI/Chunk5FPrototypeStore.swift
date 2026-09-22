@@ -772,9 +772,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             persistenceStatus = .pass
             message = "Recovered persisted live shift."
         } catch {
-            if let failedData = persistenceDefaults.data(forKey: Self.persistenceKey), let failed = try? JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: failedData), failed.shiftEndedAt != nil { shiftLifecycle = .recoveryLocked }
+            shiftLifecycle = .recoveryLocked
             persistenceStatus = .fail
-            message = "Persisted shift recovery failed; completed evidence remains locked: \(error)"
+            message = "Persisted shift recovery failed; stored evidence remains locked: \(error)"
         }
     }
 
