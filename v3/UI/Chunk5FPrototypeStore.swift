@@ -647,7 +647,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     private func recordTransactionVarianceIfRequired(calculatedLitres: Int, actualLitres: Int?, postTransactionEmpty: Bool?, operationID: String, note: String) throws {
-        if varianceFailureForTesting { throw CocoaError(.coderWriteUnknown) }
+        if varianceFailureForTesting { throw CocoaError(.fileWriteUnknown) }
         guard let actualLitres, actualLitres > 0 else { return }
         let variance = actualLitres - calculatedLitres
         var reconciliationIDs: [CanonicalID] = []
