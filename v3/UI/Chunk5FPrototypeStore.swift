@@ -1162,6 +1162,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
         guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        if s.shiftStartedAt != nil && s.shiftEndedAt == nil && s.driverLedgerEntries == nil {
+            throw Chunk5HMigrationError.activeLegacyWithoutDriverHistory
+        }
         if let entries = s.driverLedgerEntries, s.shiftStartedAt != nil {
             guard driverEvidenceValid(entries: entries, events: s.eventLog, started: s.shiftStartedAt!, ended: s.shiftEndedAt, workspace: s.workspace) else {
                 throw CocoaError(.coderReadCorrupt)
