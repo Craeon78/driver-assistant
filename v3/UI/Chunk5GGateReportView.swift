@@ -32,6 +32,7 @@ public struct Chunk5GGateReportView: View {
                     check("Deliveries represented", report.deliveriesRepresented)
                     check("Transfers represented", report.transfersRepresented)
                     check("Reconciliations represented", report.reconciliationsRepresented)
+                    check("Corrections represented", report.correctionsRepresented)
                     row("Completed planned deliveries", "\(report.completedPlannedDeliveries) / \(report.plannedDeliveries)")
                 }
                 Section("OPERATIONAL COMPLETENESS") {
