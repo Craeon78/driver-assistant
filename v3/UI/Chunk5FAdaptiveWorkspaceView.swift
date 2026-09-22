@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 @MainActor
 public struct Chunk5FAdaptiveWorkspaceView: View {
@@ -16,6 +17,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     @State private var transactionVarianceNote = ""
     @State private var zeroDeliveryReason = ""
     @State private var confirmZeroDelivery = false
+    @State private var fatigueTick = Date()
 
     public init(store: Chunk5FPrototypeStore) {
         _store = StateObject(wrappedValue: store)
@@ -59,6 +61,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
         .onChange(of: store.workspace) { _ in
             resetTransactionVarianceDraft()
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { fatigueTick = $0 }
     }
 
     private var topBar: some View {
@@ -73,6 +76,12 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             VStack {
                 Text(store.workspace == .rest ? "REST \(store.restMinutes) / 30m" : store.workspace == .preShift ? "READY TO START" : "IN SHIFT")
                     .font(.headline)
+                if let fatigue = store.dailyFatigue(asOf: fatigueTick) {
+                    Text("Driver \(fatigue.openKind?.rawValue.uppercased() ?? "OFF") · \(Int(fatigue.workSeconds / 60))m work today")
+                        .font(.caption2)
+                } else {
+                    Text("Driver ledger unavailable").font(.caption2).foregroundStyle(.red)
+                }
             }.frame(maxWidth: 300)
             Spacer()
             VStack(alignment: .trailing) {
