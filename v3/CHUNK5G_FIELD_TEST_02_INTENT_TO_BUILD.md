@@ -34,7 +34,7 @@ Implement only the exception layer and explicit state transitions established by
 - `v3/Tests/Chunk5FAdaptiveWorkspaceTests.swift`
 - `v3/Tests/Chunk5GFieldTest02ExceptionTests.swift`
 
-The ordinary cargo architecture remains unchanged. Review evidence proved one bounded ledger append defect for historical Load correction, so `v3/Cargo/CargoLedger.swift` gains an atomic reversal/replacement append that reuses the existing transaction and replay rules.
+The ordinary cargo architecture remains unchanged. Review evidence proved bounded replay defects for historical correction, so `v3/Cargo/CargoLedger.swift` gains an atomic reversal/replacement append and `v3/Cargo/CargoVarianceLedger.swift` validates later-recorded corrections against the knowledge available at an intervening physical boundary. Both reuse the existing transaction and reconciliation rules.
 
 ## Acceptance boundary
 
