@@ -112,6 +112,7 @@ private struct Chunk5GLiveSnapshot: Codable {
     var loadVisitIndex: Int?
     var workspace: Chunk5FWorkspaceState
     var runItems: [Chunk5FRunItem]?
+    var driverLedgerEntries: [WorkRestEntry]?
     var authoritativeFingerprint: String
 }
 
@@ -143,6 +144,13 @@ struct Chunk5GLegacyV2Snapshot: Codable {
 public final class Chunk5FPrototypeStore: ObservableObject {
     public let evidenceSource: Chunk5GEvidenceSource
     private let persistenceDefaults: UserDefaults
+    private var driverLedger: WorkRestLedger?
+    public var driverEntries: [WorkRestEntry] { driverLedger?.allEntries() ?? [] }
+    public func dailyFatigue(asOf now: Date = Date()) -> DailyFatigueSnapshot? {
+        guard let ledger = driverLedger else { return nil }
+        return DailyFatigueEvaluator.evaluate(entries: ledger.allEntries(), asOf: now)
+    }
+    public var currentDailyFatigue: DailyFatigueSnapshot? { dailyFatigue() }
 
     @Published public var workspace: Chunk5FWorkspaceState = .preShift
     @Published public var visits: [Chunk5FSiteVisit] = []
@@ -217,6 +225,20 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     init(evidenceSource: Chunk5GEvidenceSource, persistenceDefaults: UserDefaults) {
         self.evidenceSource = evidenceSource
         self.persistenceDefaults = persistenceDefaults
+        do {
+            let storage: WorkRestLedgerStore
+            if evidenceSource == .fixture {
+                storage = InMemoryWorkRestLedgerStore()
+            } else if persistenceDefaults === UserDefaults.standard {
+                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                storage = try FileWorkRestLedgerStore(directory: directory)
+            } else {
+                storage = DefaultsWorkRestLedgerStore(defaults: persistenceDefaults)
+            }
+            driverLedger = try WorkRestLedger(store: storage)
+        } catch {
+            driverLedger = nil
+        }
         let diesel = CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L")
         let ulp = CargoKind(name: "ULP", kind: "fuel.ulp", unitName: "L")
         self.dieselCargo = diesel
@@ -397,9 +419,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard !completedShiftLocked else { message = "Previous shift is locked until its archive is valid."; return }
         guard openingBaselineAccepted else { message = "Accept opening baseline first."; return }
         guard let odo = openingODO, odo > 0 else { message = "Opening ODO required."; return }
+        guard let driverLedger = driverLedger else { message = "Driver ledger unavailable; shift cannot start."; return }
+        let started = Date()
+        do {
+            guard driverLedger.openEntry() == nil else { message = "An open Driver interval requires review before starting a shift."; return }
+            try driverLedger.append(WorkRestEntry(kind: .work, start: started, recordedAt: started))
+        } catch { shiftLifecycle = .recoveryLocked; message = "Driver Work start failed: \(error)"; return }
         lastGateReport = nil; showGateReport = false; shiftEndedAt = nil; closingODO = nil; draftClosingODO = 0
         shiftLifecycle = .active
-        shiftStartedAt = Date()
+        shiftStartedAt = started
         appendEvent(.shiftStart, "Shift started", "Opening ODO \(odo)")
         workspace = .active
         message = "Shift started."
@@ -413,8 +441,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     }
 
     public func endShift() {
+        guard mutationAllowed, shiftLifecycle == .active, workspace == .active,
+              let driverLedger = driverLedger, driverLedger.openEntry()?.kind == .work else {
+            message = "End Shift requires an active Work interval; end Rest first."; return
+        }
         guard draftClosingODO >= (openingODO ?? 0) else { message = "Closing ODO must be ≥ opening ODO."; return }
-        closingODO = draftClosingODO; shiftEndedAt = Date()
+        let ended = Date()
+        do { try driverLedger.close(id: driverLedger.openEntry()!.id, at: ended, recordedAt: ended) }
+        catch { shiftLifecycle = .recoveryLocked; message = "Driver Work close failed: \(error)"; return }
+        closingODO = draftClosingODO; shiftEndedAt = ended
         appendEvent(.shiftEnd, "Shift ended", "Closing ODO \(draftClosingODO)")
         shiftLifecycle = .completedLocked
         workspace = .preShift
@@ -520,6 +555,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func beginRest() {
         guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard workspace == .active else { message = "Rest can start only while working."; return }
+        guard let driverLedger = driverLedger else { message = "Driver ledger unavailable."; return }
+        let boundary = Date()
+        do { try driverLedger.transition(to: .rest, at: boundary) }
+        catch { shiftLifecycle = .recoveryLocked; message = "Driver Rest start failed: \(error)"; return }
         let runID = activeRunItemID.flatMap { id in runItems.first(where: { $0.id == id && $0.kind == .plannedRest })?.id }
         let eventID = appendEvent(.restStart, "Rest started", relatedRunItemID: runID)
         linkActiveRunItem(kind: .plannedRest, to: eventID)
@@ -527,6 +566,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     public func endRest() {
         guard mutationAllowed else { message = "Completed shift is locked for recovery."; return }
         guard workspace == .rest else { message = "No active Rest to end."; return }
+        guard let driverLedger = driverLedger else { message = "Driver ledger unavailable."; return }
+        do { try driverLedger.transition(to: .work, at: Date()) }
+        catch { shiftLifecycle = .recoveryLocked; message = "Driver Rest end failed: \(error)"; return }
         workspace = .active; appendEvent(.restEnd, "Rest ended"); activeRunItemID = nil; persistLiveSnapshot() }
     public func beginOtherWork(title _: String = "Other Work") { guard mutationAllowed, workspace == .active else { return }; let runID = activeRunItemID.flatMap { id in runItems.first(where: { $0.id == id && $0.kind == .plannedOtherWork })?.id }; let eventID = appendEvent(.workRest, "Work started", relatedRunItemID: runID); linkActiveRunItem(kind: .plannedOtherWork, to: eventID); workspace = .otherWork; persistLiveSnapshot() }
     public func endOtherWork() { guard mutationAllowed, workspace == .otherWork else { return }; workspace = .active; appendEvent(.workRest, "Work context ended"); activeRunItemID = nil; persistLiveSnapshot() }
@@ -903,14 +945,22 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
         let history = historyFingerprint(events: eventLog, ledger: cargoLedger, reconciliationLog: reconciliationLog)
-        return cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: eventLog, unresolvedDiscrepancies: unresolvedDiscrepancies) + "##runItems:" + stableJSON(runItems)
+        return cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: eventLog, unresolvedDiscrepancies: unresolvedDiscrepancies) + "##runItems:" + stableJSON(runItems) + "##driverLedger:" + stableJSON(driverEntries)
     }
 
     public func persistLiveSnapshot() {
         guard evidenceSource == .live else { return }
         let fingerprint = authoritativeFingerprint()
-        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, workspace: workspace, runItems: runItems, authoritativeFingerprint: fingerprint)
-        do { persistenceDefaults.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = fingerprint } catch { message = "Snapshot save failed: \(error)" }
+        let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, workspace: workspace, runItems: runItems, driverLedgerEntries: driverEntries, authoritativeFingerprint: fingerprint)
+        do {
+            let bytes = try JSONEncoder().encode(snap)
+            persistenceDefaults.set(bytes, forKey: Self.persistenceKey)
+            guard persistenceDefaults.data(forKey: Self.persistenceKey) == bytes else { throw CocoaError(.fileWriteUnknown) }
+            persistedFingerprint = fingerprint
+        } catch {
+            if shiftLifecycle == .active { shiftLifecycle = .recoveryLocked }
+            message = "Snapshot save failed; stop and recover before further work: \(error)"
+        }
     }
 
     /// Recomputes only the persistence seal so deterministic fixtures can prove
@@ -932,7 +982,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }.joined(separator: "||")
         let history = historyFingerprint(events: snapshot.eventLog, ledger: snapshot.cargoLedger, reconciliationLog: snapshot.reconciliationLog)
         let runItemsSuffix = snapshot.runItems.map { "##runItems:" + stableJSON($0) } ?? ""
-        snapshot.authoritativeFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: snapshot.eventLog, unresolvedDiscrepancies: snapshot.unresolvedDiscrepancies) + runItemsSuffix
+        let driverSuffix = snapshot.driverLedgerEntries.map { "##driverLedger:" + stableJSON($0) } ?? ""
+        snapshot.authoritativeFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: snapshot.eventLog, unresolvedDiscrepancies: snapshot.unresolvedDiscrepancies) + runItemsSuffix + driverSuffix
         persistenceDefaults.set(try JSONEncoder().encode(snapshot), forKey: Self.persistenceKey)
     }
 
@@ -1077,8 +1128,28 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         guard representedCorrectionIDs == ledgerCorrectionIDs else { throw CocoaError(.coderReadCorrupt) }
     }
 
+    private func driverEvidenceValid(entries: [WorkRestEntry], events: [Chunk5GEvent], started: Date?, ended: Date?, workspace: Chunk5FWorkspaceState) -> Bool {
+        guard let started else { return entries.filter(\.isOpen).isEmpty }
+        let current = entries.filter { $0.start >= started && (ended == nil || $0.start <= ended!) }
+        guard let first = current.first, first.kind == .work, first.start == started,
+              current.allSatisfy({ $0.end == nil || $0.end! >= $0.start }),
+              zip(current, current.dropFirst()).allSatisfy({ pair in pair.0.end == pair.1.start && pair.0.kind != pair.1.kind }) else { return false }
+        let restStarts = events.filter { $0.kind == .restStart }.count
+        let restEnds = events.filter { $0.kind == .restEnd }.count
+        guard current.filter({ $0.kind == .rest }).count == restStarts,
+              current.filter({ $0.kind == .rest && $0.end != nil }).count == restEnds else { return false }
+        if ended != nil { return current.last?.end == ended && entries.filter(\.isOpen).isEmpty }
+        let open = current.filter(\.isOpen)
+        return open.count == 1 && open[0].kind == (workspace == .rest ? .rest : .work)
+    }
+
     private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
         guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        if let entries = s.driverLedgerEntries, s.shiftStartedAt != nil {
+            guard driverEvidenceValid(entries: entries, events: s.eventLog, started: s.shiftStartedAt!, ended: s.shiftEndedAt, workspace: s.workspace) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+        }
         try validateExceptionFacts(events: s.eventLog, ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartments: s.compartments)
         let snapshotRunItems = s.runItems ?? s.visits.map { Chunk5FRunItem(kind: $0.isTerminalLoad ? .terminalLoad : .siteVisit, siteVisitID: $0.isTerminalLoad ? nil : $0.id, title: $0.isTerminalLoad ? "Terminal / Load" : "\($0.customer) — \($0.site)", requestedTime: $0.requestedTime) }
         if s.runItems != nil {
@@ -1214,7 +1285,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }.joined(separator: "||")
         let history = historyFingerprint(events: s.eventLog, ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog)
         let runItemsSuffix = s.runItems.map { "##runItems:" + stableJSON($0) } ?? ""
-        let expectedFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: s.eventLog, unresolvedDiscrepancies: s.unresolvedDiscrepancies) + runItemsSuffix
+        let driverSuffix = s.driverLedgerEntries.map { "##driverLedger:" + stableJSON($0) } ?? ""
+        let expectedFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: s.eventLog, unresolvedDiscrepancies: s.unresolvedDiscrepancies) + runItemsSuffix + driverSuffix
         guard expectedFingerprint == s.authoritativeFingerprint else {
             throw CocoaError(.coderReadCorrupt)
         }
@@ -1222,6 +1294,11 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     private func installValidated(snapshot s: Chunk5GLiveSnapshot) throws {
         try validate(snapshot: s)
+        // The Driver file is authoritative. An interrupted two-store write may
+        // leave it ahead of the snapshot: lock instead of replaying or inventing.
+        if let persisted = s.driverLedgerEntries {
+            guard driverLedger?.allEntries() == persisted else { throw CocoaError(.coderReadCorrupt) }
+        }
         let retainedVisits = s.visits.filter { !$0.isTerminalLoad }
         let normalizedRunItems: [Chunk5FRunItem]
         if let persistedRunItems = s.runItems {
@@ -1304,7 +1381,10 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let reconciliationRepresentation = reconciliationsRepresented(events: s.eventLog, log: s.reconciliationLog)
         let correctionRepresentation = correctionsRepresented(events: s.eventLog, ledger: s.cargoLedger)
         let odoAnchorsOK = (s.openingODO ?? 0) > 0 && (s.closingODO ?? 0) >= (s.openingODO ?? 0)
-        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation ? .pass : .fail
+        let driverStatus: Chunk5GCheckStatus = s.driverLedgerEntries.map {
+            driverEvidenceValid(entries: $0, events: s.eventLog, started: s.shiftStartedAt, ended: s.shiftEndedAt, workspace: s.workspace) ? .pass : .fail
+        } ?? .notTested
+        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation && driverStatus != .fail ? .pass : .fail
         return Chunk5GGateReport(
             shiftStart: s.shiftStartedAt, shiftEnd: s.shiftEndedAt, openingODO: s.openingODO, closingODO: s.closingODO,
             events: s.eventLog, cargoOpening: s.cargoOpeningSnapshot, cargoClosing: cargoClosing,
@@ -1319,6 +1399,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             persistenceStatus: status,
             representationIntegrityStatus: integrity,
             operationalCompletenessStatus: .notTested,
+            driverLedgerStatus: driverStatus,
             plannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count,
             completedPlannedDeliveries: s.visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count
         )
@@ -1394,6 +1475,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             loadVisitIndex: old.loadVisitIndex,
             workspace: derivedWorkspace,
             runItems: nil,
+            driverLedgerEntries: nil,
             authoritativeFingerprint: derivedFingerprint
         )
 
@@ -1484,7 +1566,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let reconciliationRepresentation = reconciliationsRepresented(events: eventLog, log: reconciliationLog)
         let correctionRepresentation = correctionsRepresented(events: eventLog, ledger: cargoLedger)
         let odoAnchorsOK = (openingODO ?? 0) > 0 && (closingODO ?? 0) >= (openingODO ?? 0)
-        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation ? .pass : .fail
-        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: loadsRepresented, deliveriesRepresented: deliveriesRepresented, transfersRepresented: transfersRepresented, reconciliationsRepresented: reconciliationRepresentation, correctionsRepresented: correctionRepresentation, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: odoAnchorsOK, persistenceStatus: persistenceStatus, representationIntegrityStatus: integrity, operationalCompletenessStatus: .notTested, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
+        let driverStatus: Chunk5GCheckStatus = driverLedger.map { driverEvidenceValid(entries: $0.allEntries(), events: eventLog, started: shiftStartedAt, ended: shiftEndedAt, workspace: workspace) ? .pass : .fail } ?? .notTested
+        let integrity: Chunk5GCheckStatus = arithmeticOK && odoAnchorsOK && loadsRepresented && deliveriesRepresented && transfersRepresented && reconciliationRepresentation && correctionRepresentation && driverStatus != .fail ? .pass : .fail
+        return Chunk5GGateReport(shiftStart: shiftStartedAt, shiftEnd: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, events: eventLog, cargoOpening: cargoOpeningSnapshot, cargoClosing: confirmedLitres, unresolvedDiscrepancies: unresolvedDiscrepancies, loadsRepresented: loadsRepresented, deliveriesRepresented: deliveriesRepresented, transfersRepresented: transfersRepresented, reconciliationsRepresented: reconciliationRepresentation, correctionsRepresented: correctionRepresentation, cargoArithmeticOK: arithmeticOK, odoAnchorsOK: odoAnchorsOK, persistenceStatus: persistenceStatus, representationIntegrityStatus: integrity, operationalCompletenessStatus: .notTested, driverLedgerStatus: driverStatus, plannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).count, completedPlannedDeliveries: visits.filter { !$0.isTerminalLoad }.flatMap(\.fills).filter(\.completed).count)
     }
 }
