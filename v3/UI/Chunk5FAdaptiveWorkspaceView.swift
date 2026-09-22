@@ -309,7 +309,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         Text("Select Load / Delivery").tag(Optional<UUID>.none)
                         ForEach(store.correctableCargoEvents) { event in
                             Text("\(event.kind.rawValue.capitalized) — \(event.committedLitres ?? 0) L")
-                                .tag(Optional(event.id))
+                                .tag(UUID?.some(event.id))
                         }
                     }
                     HStack {
