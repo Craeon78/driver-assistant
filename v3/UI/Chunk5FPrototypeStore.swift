@@ -610,6 +610,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         openingODO=s.openingODO; closingODO=s.closingODO; cargoOpeningSnapshot=s.cargoOpeningSnapshot
         unresolvedDiscrepancies=s.unresolvedDiscrepancies; dieselCargo=s.dieselCargo; ulpCargo=s.ulpCargo
         selectedVisit=s.selectedVisit; selectedFill=s.selectedFill; restMinutes=s.restMinutes; loadVisitIndex=s.loadVisitIndex; workspace=s.workspace
+        shiftLifecycle = s.shiftEndedAt != nil ? .completedLocked : (s.shiftStartedAt != nil ? .active : .fresh)
         resetDraft()
         persistedFingerprint=s.authoritativeFingerprint
     }
