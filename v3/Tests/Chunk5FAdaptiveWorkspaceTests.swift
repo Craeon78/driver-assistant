@@ -87,9 +87,10 @@ public enum Chunk5FAdaptiveWorkspaceTests {
         store.workspace = .active
         store.beginRest()
         check("Rest state is explicit", store.workspace == .rest)
-        check("Rest start is logged", store.eventLog.contains { $0.kind == .workRest && $0.summary.contains("Rest started") })
+        check("Rest start is logged", store.eventLog.contains { $0.kind == .restStart && $0.summary.contains("Rest started") })
         store.endRest()
         check("End Rest returns Active", store.workspace == .active)
+        check("Rest end is logged", store.eventLog.contains { $0.kind == .restEnd && $0.summary.contains("Rest ended") })
 
         output.append("---")
         output.append(output.contains(where: { $0.hasSuffix("FAIL") }) ? "GATE FAIL" : "GATE PASS")

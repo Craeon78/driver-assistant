@@ -24,14 +24,23 @@ public struct Chunk5GGateReportView: View {
                     row("Closing", report.cargoClosing.map(String.init).joined(separator: ", "))
                     row("Unresolved discrepancies", "\(report.unresolvedDiscrepancies)")
                 }
-                Section("INTERNAL CHECKS") {
+                Section("INTERNAL INTEGRITY") {
+                    status("Representation integrity", report.representationIntegrityStatus)
                     check("Cargo arithmetic", report.cargoArithmeticOK)
                     check("ODO anchors", report.odoAnchorsOK)
                     check("Loads represented", report.loadsRepresented)
                     check("Deliveries represented", report.deliveriesRepresented)
                     check("Transfers represented", report.transfersRepresented)
                     check("Reconciliations represented", report.reconciliationsRepresented)
+                    check("Corrections represented", report.correctionsRepresented)
                     row("Completed planned deliveries", "\(report.completedPlannedDeliveries) / \(report.plannedDeliveries)")
+                }
+                Section("OPERATIONAL COMPLETENESS") {
+                    row("Status", report.operationalCompletenessStatus == .notTested ? "NOT ESTABLISHED" : report.operationalCompletenessStatus.rawValue)
+                    Text("Internal consistency does not establish that every real-world action was captured.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Section("PERSISTENCE") {
                     status("Persistence/replay", report.persistenceStatus)
                 }
                 Section("CHRONOLOGICAL EVENTS") {
