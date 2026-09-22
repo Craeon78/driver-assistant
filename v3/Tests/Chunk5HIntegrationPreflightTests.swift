@@ -94,6 +94,8 @@ public enum Chunk5HIntegrationPreflightTests {
         recovered.acceptOpeningBaseline()
         recovered.startShift()
         check("Next shift retains prior Driver intervals", recovered.driverEntries.count == previousDriverEntries.count + 1 && Array(recovered.driverEntries.dropLast()) == previousDriverEntries && recovered.driverEntries.last?.kind == .work)
+        let laterShift = Chunk5FPrototypeStore(recoveringFrom: defaults)
+        check("Prior archive survives later Driver work", laterShift.shiftLifecycle == .active && laterShift.lastGateReport?.driverLedgerStatus == .pass && laterShift.driverEntries == recovered.driverEntries)
 
         let legacySuite = "chunk5h.active.legacy.\(UUID().uuidString)"
         if let legacyDefaults = UserDefaults(suiteName: legacySuite) {
@@ -192,6 +194,25 @@ public enum Chunk5HIntegrationPreflightTests {
                 check("Completed mismatch cannot reset as ready", locked.lastGateReport == nil && locked.shiftStartedAt == nil && locked.completedShiftLocked)
             } else { lines.append("Completed Driver mismatch fixture archive: FAIL") }
         } else { lines.append("Completed Driver mismatch isolated defaults: FAIL") }
+
+        let archiveSuite = "chunk5h.archived-driver-loss.\(UUID().uuidString)"
+        if let archiveDefaults = UserDefaults(suiteName: archiveSuite) {
+            defer { archiveDefaults.removePersistentDomain(forName: archiveSuite) }
+            let archived = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: archiveDefaults)
+            archived.draftOpeningODO = 804_000
+            archived.acceptOpeningBaseline()
+            archived.startShift()
+            archived.draftClosingODO = 804_009
+            archived.endShift()
+            let archivedBytes = archiveDefaults.data(forKey: "chunk5g.completed.previous.snapshot.v3")
+            check("Archived-only fixture has completed evidence", archivedBytes != nil && archiveDefaults.data(forKey: "chunk5g.live.snapshot.v3") == nil)
+            archiveDefaults.removeObject(forKey: "chunk5h.driver.ledger")
+            let lockedArchive = Chunk5FPrototypeStore(recoveringFrom: archiveDefaults)
+            check("Archived-only Driver loss cannot report PASS", lockedArchive.shiftLifecycle == .recoveryLocked && lockedArchive.persistenceStatus == .fail && lockedArchive.lastGateReport == nil)
+            check("Archived-only evidence survives Driver loss", archivedBytes != nil && archiveDefaults.data(forKey: "chunk5g.completed.previous.snapshot.v3") == archivedBytes)
+            lockedArchive.startShift()
+            check("Archived-only mismatch blocks next shift", lockedArchive.shiftStartedAt == nil && lockedArchive.completedShiftLocked)
+        } else { lines.append("Archived-only Driver mismatch isolated defaults: FAIL") }
         lines.append("5H FIELD GATE: AWAITING REAL WORKING SHIFT")
         return lines
     }
