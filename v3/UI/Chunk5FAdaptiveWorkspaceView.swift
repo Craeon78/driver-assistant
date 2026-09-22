@@ -53,6 +53,9 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 }
             }
         }
+        .onChange(of: store.workspace) { _ in
+            resetTransactionVarianceDraft()
+        }
     }
 
     private var topBar: some View {
@@ -169,31 +172,35 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var active: some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel("NEXT SITE") {
-                if let next = store.nextIncompleteVisit {
-                    Text(next.customer).font(.title2.bold())
-                    Text(next.site)
-                    Text("\(next.plannedLitres.formatted()) L")
-                } else {
-                    Text(store.visits.isEmpty ? "NO SITES PLANNED" : "RUN COMPLETE").font(.title2.bold())
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                panel("NEXT SITE") {
+                    if let next = store.nextIncompleteVisit {
+                        Text(next.customer).font(.title2.bold())
+                        Text(next.site)
+                        Text("\(next.plannedLitres.formatted()) L")
+                    } else {
+                        Text(store.visits.isEmpty ? "NO SITES PLANNED" : "RUN COMPLETE").font(.title2.bold())
+                    }
+                    Text("Cargo: \(store.confirmedLitres.map(String.init).joined(separator: ", "))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Divider()
+                    Text("Closing ODO").font(.caption.bold())
+                    TextField("Closing ODO", value: $store.draftClosingODO, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+                }.frame(width: 230)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14).fill(.quaternary)
+                    VStack {
+                        Image(systemName: "map").font(.system(size: 72))
+                        Text("MAP — status, not analysis").font(.caption)
+                    }
                 }
-                Text("Cargo: \(store.confirmedLitres.map(String.init).joined(separator: ", "))")
-                    .font(.caption2).foregroundStyle(.secondary)
-                Divider()
-                Text("Closing ODO").font(.caption.bold())
-                TextField("Closing ODO", value: $store.draftClosingODO, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(.numberPad)
-            }.frame(width: 230)
-            ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(.quaternary)
-                VStack {
-                    Image(systemName: "map").font(.system(size: 72))
-                    Text("MAP — status, not analysis").font(.caption)
-                }
+                Chunk5FRunView(store: store).frame(width: 280)
             }
-            Chunk5FRunView(store: store).frame(width: 280)
+            panel("HISTORY CORRECTION (append-only)") { correctionControls }
+                .padding(.horizontal, 12)
         }
     }
 
@@ -304,29 +311,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     }
                     .font(.caption)
 
-                    Text("Correction (input error)").font(.caption.bold())
-                    Picker("Original event", selection: $correctionEventID) {
-                        Text("Select Load / Delivery").tag(Optional<UUID>.none)
-                        ForEach(store.correctableCargoEvents) { event in
-                            Text("\(event.kind.rawValue.capitalized) — \(event.committedLitres ?? 0) L")
-                                .tag(UUID?.some(event.id))
-                        }
-                    }
-                    HStack {
-                        Picker("C", selection: $correctionIndex) {
-                            ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
-                        }
-                        TextField("Correct total L", value: $correctionCorrectedLitres, format: .number)
-                            .textFieldStyle(.roundedBorder).frame(width: 110).keyboardType(.numberPad)
-                        Button("CONFIRM CORRECTION") {
-                            if let eventID = correctionEventID {
-                                store.commitCorrection(eventID: eventID, correctedLitres: correctionCorrectedLitres, compartment: correctionIndex, note: "Driver correction")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(correctionEventID == nil || correctionCorrectedLitres <= 0)
-                    }
-                    .font(.caption)
+                    correctionControls
                 }.frame(width: 320)
             }
             panel("TRANSACTION VARIANCE (optional)") {
@@ -344,11 +329,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
                 Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") {
+                    let eventCount = store.eventLog.count
                     store.commitDelivery(
                         actualLitres: transactionActualLitres > 0 ? transactionActualLitres : nil,
                         postTransactionEmpty: transactionActualLitres > 0 ? transactionPostEmpty : nil,
                         varianceNote: transactionVarianceNote
                     )
+                    if store.eventLog.count > eventCount { resetTransactionVarianceDraft() }
                 }
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.deliveryDraftIsValid)
@@ -381,11 +368,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
                 Button("CONFIRM LOAD") {
+                    let eventCount = store.eventLog.count
                     store.commitLoad(
                         actualLitres: transactionActualLitres > 0 ? transactionActualLitres : nil,
                         postTransactionEmpty: transactionActualLitres > 0 ? transactionPostEmpty : nil,
                         varianceNote: transactionVarianceNote
                     )
+                    if store.eventLog.count > eventCount { resetTransactionVarianceDraft() }
                 }.buttonStyle(.borderedProminent)
             }
             if !store.message.isEmpty {
@@ -393,6 +382,49 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
         }
         .padding()
+    }
+
+    @ViewBuilder
+    private var correctionControls: some View {
+        Text("Correction (input error)").font(.caption.bold())
+        if store.correctableCargoEvents.isEmpty {
+            Text("No uncorrected Load or Delivery history is available.")
+                .font(.caption2).foregroundStyle(.secondary)
+        } else {
+            Picker("Original event", selection: $correctionEventID) {
+                Text("Select Load / Delivery").tag(Optional<UUID>.none)
+                ForEach(store.correctableCargoEvents) { event in
+                    Text("\(event.kind.rawValue.capitalized) — \(event.committedLitres ?? 0) L")
+                        .tag(UUID?.some(event.id))
+                }
+            }
+            HStack {
+                Picker("C", selection: $correctionIndex) {
+                    ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
+                }
+                TextField("Correct total L", value: $correctionCorrectedLitres, format: .number)
+                    .textFieldStyle(.roundedBorder).frame(width: 110).keyboardType(.numberPad)
+                Button("CONFIRM CORRECTION") {
+                    if let eventID = correctionEventID {
+                        let eventCount = store.eventLog.count
+                        store.commitCorrection(eventID: eventID, correctedLitres: correctionCorrectedLitres, compartment: correctionIndex, note: "Driver correction")
+                        if store.eventLog.count > eventCount {
+                            correctionEventID = nil
+                            correctionCorrectedLitres = 0
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(correctionEventID == nil || correctionCorrectedLitres <= 0)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func resetTransactionVarianceDraft() {
+        transactionActualLitres = 0
+        transactionPostEmpty = false
+        transactionVarianceNote = ""
     }
 
     private func panel<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
