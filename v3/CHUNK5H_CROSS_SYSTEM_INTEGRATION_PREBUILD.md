@@ -9,7 +9,7 @@
 
 Chunk 5H exists to prove that the already-passed Driver/Work-Rest/Fatigue, Vehicle/Operations, Cargo/Fuel, Run/Plan, ODO/time and persistence/recovery systems can coexist through one realistic tanker shift **without contradicting one another, corrupting truth, inventing history or promoting estimates into facts**.
 
-5H is a cross-system integration gate. It is not a new predictive-intelligence feature.
+5H is a cross-system integration gate. It is not a new predictive-intelligence feature.\n\n**Primary acceptance is a live real shift on the iPad.** A deterministic harness may be built only as preflight/regression support; harness success alone cannot pass 5H.
 
 Canonical question:
 
@@ -115,7 +115,7 @@ Do not add synthetic pump-start/pump-finish timestamps merely to make future ana
 
 Known future intelligence candidates such as delivery method (nozzle, auto-shut-off nozzle, 2-inch bulk, 3-inch bulk, 3-inch gravity, 4-inch gravity), observed flow behaviour, site overhead and travel duration are **future model inputs** unless an already-authoritative field exists today.
 
-## 7. Adversarial acceptance scenarios
+## 7. Live-shift acceptance model\n\n5H should be exercised primarily by Cory during a **real working shift**, using the normal DA workflow as events actually occur. The purpose is to let already-passed systems collide naturally rather than to script a synthetic day and call that integration proven.\n\nA deterministic integration harness is still useful before field use to catch obvious regressions and reproduce defects, but it is subordinate evidence. It must not replace the live-shift gate.\n\nThe live shift does not need to manufacture every exception below. Where a rare scenario does not occur naturally, a bounded harness/fixture may provide supplementary coverage without being confused with field evidence.\n\n## 8. Adversarial acceptance scenarios
 
 Niles may refine the exact harness, but 5H should prove at least the following classes.
 
@@ -164,7 +164,7 @@ Expected: exception provenance remains intact and Driver truth is unaffected exc
 - Gate can reconstruct event order.
 - Representation integrity can PASS while operational completeness remains NOT ESTABLISHED unless external completeness evidence exists.
 
-## 8. Deliberate non-goals
+## 9. Deliberate non-goals
 
 5H does not build:
 - learned route times;
@@ -185,7 +185,7 @@ Expected: exception provenance remains intact and Driver truth is unaffected exc
 
 A finding that genuinely requires one of these is captured as a later roadmap dependency, not silently absorbed into 5H.
 
-## 9. Role-specific prebuild duties
+## 10. Role-specific prebuild duties
 
 ### Jarvis — orchestration
 - treat this file as the cold-start handoff;
@@ -217,7 +217,7 @@ A finding that genuinely requires one of these is captured as a later roadmap de
 - separate awkward UX from truth-model failure;
 - red-team whether a "smart" behaviour is actually supported by available evidence.
 
-## 10. Lifecycle handoff for Work
+## 11. Lifecycle handoff for Work
 
 Expected sequence:
 
@@ -229,9 +229,9 @@ A Work session should be able to begin with:
 
 > Jarvis: resume Driver Assistant Chunk 5H from `v3/CHUNK5H_CROSS_SYSTEM_INTEGRATION_PREBUILD.md`. Niles first. Verify current main and 5G PASS evidence, then take the bounded cross-system integration gate through the CozzaHQ lifecycle. Do not expand into predictive scheduling, route/site duration, flow-rate intelligence, Journal, Numbers/Simulation/Command or release hardening.
 
-## 11. Completion criterion
+## 12. Completion criterion
 
-5H passes only when target-runtime evidence demonstrates that the already-passed systems can interact through a representative shift without:
+5H passes only when **live-shift target-runtime evidence**, supported by regression/harness evidence where needed, demonstrates that the already-passed systems can interact through a representative real shift without:
 - inventing or rewriting history;
 - corrupting cargo or Driver truth;
 - collapsing plan into execution;
@@ -241,8 +241,8 @@ A Work session should be able to begin with:
 
 If 5H passes, **Chunk 5 may be adjudicated complete** subject to Niles confirming no unresolved Chunk 5 contractual residual remains.
 
-## 12. Current disposition
+## 13. Current disposition
 
-- Chunk 5G: PASS on merged/runtime evidence.
+- Chunk 5G: PASS. Durable closeout evidence: `v3/CHUNK5G_CLOSEOUT.md`.
 - Chunk 5H: PREBUILD / not yet authorised for implementation.
 - Chunk 5: OPEN pending 5H and final Niles closeout.
