@@ -9,6 +9,7 @@
 | ADD | `v3/Tests/Chunk5HIntegrationPreflightTests.swift` | Add as a new Swift source. |
 | ADD | `v3/Chunk5HPreflightPlaygroundsRunner.swift` | Add as a new Swift source. |
 | REPLACE | `v3/Driver/WorkRestLedger.swift` | Replace existing canonical Driver ledger source. |
+| REPLACE | `v3/Tests/Chunk5GRecoveryMigrationTests.swift` | Replace the executable legacy recovery regression with its 5H migration expectations. |
 | REPLACE | `v3/UI/Chunk5FPrototypeStore.swift` | Replace live workflow store. |
 | REPLACE | `v3/UI/Chunk5FAdaptiveWorkspaceView.swift` | Replace live workspace with canonical fatigue readout. |
 | REPLACE | `v3/UI/Chunk5GEventLog.swift` | Replace Gate report data definition. |
@@ -16,9 +17,10 @@
 | DELETE | none | Do not delete 5G tests or sources. |
 | UNCHANGED | Other V3 Cargo/Run/Vehicle/Policy sources | Retain the current `main` versions. |
 
-If the Playgrounds master predates PR #39, this delta is insufficient: sync the current `main` V3 sources first, including the `CocoaError(.fileWriteUnknown)` compile fix. Niles must verify the final delta against the actual merged candidate.
+If the Playgrounds master predates PR #39, this delta is insufficient: sync the current `main` V3 sources first, including the `CocoaError(.fileWriteUnknown)` compile fix. This manifest is relative to `main` at `bf23ef7`; check again if `main` moves before import.
 
 **Before importing:** finish and archive any active 5G shift. An older mid-shift snapshot has no canonical Driver intervals; 5H must not silently invent past Work/Rest on upgrade. Begin the field gate from a fresh `READY TO START` state.
+If an older active snapshot is already present, retain its original evidence and use the recovery-locked path; do not try to resume its Cargo or Run as a 5H shift.
 
 ## Temporary preflight ContentView
 
