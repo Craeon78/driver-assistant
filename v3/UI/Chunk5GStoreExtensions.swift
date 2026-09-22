@@ -58,6 +58,7 @@ extension Chunk5FPrototypeStore {
             message = "Next drop: \(f.name) — \(f.plannedLitres) L \(f.product)."
             return true
         }
+        finishCurrentSiteRunContext()
         workspace = .active
         message = "Site visit complete."
         return false

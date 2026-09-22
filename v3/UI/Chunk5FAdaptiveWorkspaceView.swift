@@ -14,6 +14,8 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     @State private var transactionActualLitres = 0
     @State private var transactionPostEmpty = false
     @State private var transactionVarianceNote = ""
+    @State private var zeroDeliveryReason = ""
+    @State private var confirmZeroDelivery = false
 
     public init(store: Chunk5FPrototypeStore) {
         _store = StateObject(wrappedValue: store)
@@ -33,10 +35,11 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 case .site: site
                 case .load: load
                 case .rest: active
+                case .otherWork: active
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if store.workspace == .active || store.workspace == .rest {
+            if store.workspace == .active || store.workspace == .rest || store.workspace == .otherWork {
                 bottomBar
             }
             if !store.message.isEmpty && store.workspace != .preShift {
@@ -73,11 +76,11 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }.frame(maxWidth: 300)
             Spacer()
             VStack(alignment: .trailing) {
-                if let next = store.nextIncompleteVisit {
-                    Text("NEXT: \(next.customer)")
-                    Text(next.site).font(.caption)
+                if let next = store.nextUnexecutedRunItem {
+                    Text("NEXT: \(next.title)")
+                    Text(next.kind.rawValue).font(.caption)
                 } else {
-                    Text(store.visits.isEmpty ? "NO RUN YET" : "RUN COMPLETE")
+                    Text(store.runItems.isEmpty ? "NO RUN YET" : "RUN COMPLETE")
                     Text(store.openingBaselineAccepted ? "Baseline OK" : "Baseline required").font(.caption)
                 }
             }
@@ -180,7 +183,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                         Text(next.site)
                         Text("\(next.plannedLitres.formatted()) L")
                     } else {
-                        Text(store.visits.isEmpty ? "NO SITES PLANNED" : "RUN COMPLETE").font(.title2.bold())
+                        Text(store.runItems.isEmpty ? "NO RUN PLANNED" : "NO SITE VISITS REMAINING").font(.title2.bold())
                     }
                     Text("Cargo: \(store.confirmedLitres.map(String.init).joined(separator: ", "))")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -199,7 +202,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 }
                 Chunk5FRunView(store: store).frame(width: 280)
             }
-            if !store.isResting {
+            if !store.isResting && store.workspace != .otherWork {
                 panel("HISTORY CORRECTION (append-only)") { correctionControls }
                     .padding(.horizontal, 12)
             }
@@ -220,6 +223,8 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 .disabled(store.prototypeSpeedKmh > 5)
             if store.isResting {
                 Button("END REST") { store.endRest() }
+            } else if store.workspace == .otherWork {
+                Button("END OTHER WORK") { store.endOtherWork() }
             } else {
                 Button("START REST") { store.beginRest() }
             }
@@ -232,6 +237,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     }
 
     private var site: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(spacing: 12) {
             HStack {
                 Button("BACK TO ACTIVE") { store.returnToActive() }
@@ -277,6 +283,7 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 VStack(alignment: .leading) {
                     Text("TRUCK — proposed remaining quantities").font(.headline)
                     Chunk5FTruckCargoView(store: store, mode: .site)
+                        .frame(height: 330)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text("+\(store.deliveryMovement.formatted()) L").font(.title2.bold())
@@ -328,6 +335,11 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             HStack {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
+                TextField("0 L reason", text: $zeroDeliveryReason)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+                Button("RECORD 0 L OUTCOME") { confirmZeroDelivery = true }
+                    .buttonStyle(.bordered)
+                    .disabled(zeroDeliveryReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.deliveryMovement != 0)
                 Spacer()
                 Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") {
                     let eventCount = store.eventLog.count
@@ -343,6 +355,17 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
         }
         .padding()
+        }
+        .confirmationDialog("Record a deliberate 0 L delivery outcome for this fill?", isPresented: $confirmZeroDelivery, titleVisibility: .visible) {
+            Button("RECORD 0 L OUTCOME") {
+                let count = store.eventLog.count
+                store.commitZeroDelivery(reason: zeroDeliveryReason)
+                if store.eventLog.count > count { zeroDeliveryReason = "" }
+            }
+            Button("KEEP EDITING", role: .cancel) { }
+        } message: {
+            Text("Planned litres remain unchanged. No cargo movement will be created.")
+        }
     }
 
     private var load: some View {

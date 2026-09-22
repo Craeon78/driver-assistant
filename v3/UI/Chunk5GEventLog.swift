@@ -55,6 +55,23 @@ public struct Chunk5GInputCorrection: Codable, Sendable, Equatable {
     }
 }
 
+public struct Chunk5GDeliveryOutcome: Codable, Sendable, Equatable {
+    public let siteVisitID: UUID
+    public let fillID: UUID
+    public let runItemID: UUID
+    public let plannedLitres: Int
+    public let actualLitres: Int
+    public let reason: String?
+    public let occurredAt: Date
+    public let provenance: EventProvenance
+
+    public init(siteVisitID: UUID, fillID: UUID, runItemID: UUID, plannedLitres: Int, actualLitres: Int, reason: String? = nil, occurredAt: Date = Date(), provenance: EventProvenance = .driverEntered) {
+        self.siteVisitID = siteVisitID; self.fillID = fillID; self.runItemID = runItemID
+        self.plannedLitres = plannedLitres; self.actualLitres = actualLitres
+        self.reason = reason; self.occurredAt = occurredAt; self.provenance = provenance
+    }
+}
+
 /// Minimal chronological event for 5G reconstruction (Slice F) and Gate Report (Slice G).
 public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
@@ -63,10 +80,12 @@ public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
     public let summary: String
     public let detail: String
     public let relatedOperationID: String?
+    public let relatedRunItemID: UUID?
     public let committedLitres: Int?
     public let transactionVariance: Chunk5GTransactionVariance?
     public let physicalCheck: Chunk5GPhysicalCheck?
     public let inputCorrection: Chunk5GInputCorrection?
+    public let deliveryOutcome: Chunk5GDeliveryOutcome?
 
     public enum Kind: String, Codable, Sendable {
         case shiftStart, shiftEnd
@@ -79,11 +98,11 @@ public struct Chunk5GEvent: Identifiable, Equatable, Codable, Sendable {
         case relaunch
     }
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), kind: Kind, summary: String, detail: String = "", relatedOperationID: String? = nil, committedLitres: Int? = nil, transactionVariance: Chunk5GTransactionVariance? = nil, physicalCheck: Chunk5GPhysicalCheck? = nil, inputCorrection: Chunk5GInputCorrection? = nil) {
+    public init(id: UUID = UUID(), timestamp: Date = Date(), kind: Kind, summary: String, detail: String = "", relatedOperationID: String? = nil, relatedRunItemID: UUID? = nil, committedLitres: Int? = nil, transactionVariance: Chunk5GTransactionVariance? = nil, physicalCheck: Chunk5GPhysicalCheck? = nil, inputCorrection: Chunk5GInputCorrection? = nil, deliveryOutcome: Chunk5GDeliveryOutcome? = nil) {
         self.id = id; self.timestamp = timestamp; self.kind = kind
         self.summary = summary; self.detail = detail
-        self.relatedOperationID = relatedOperationID; self.committedLitres = committedLitres
-        self.transactionVariance = transactionVariance; self.physicalCheck = physicalCheck; self.inputCorrection = inputCorrection
+        self.relatedOperationID = relatedOperationID; self.relatedRunItemID = relatedRunItemID; self.committedLitres = committedLitres
+        self.transactionVariance = transactionVariance; self.physicalCheck = physicalCheck; self.inputCorrection = inputCorrection; self.deliveryOutcome = deliveryOutcome
     }
 }
 
