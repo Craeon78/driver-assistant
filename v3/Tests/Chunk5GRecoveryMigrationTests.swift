@@ -85,6 +85,10 @@ public enum Chunk5GRecoveryMigrationTests {
             let replayed = Chunk5FPrototypeStore(recoveringFrom: defaults)
             check("Second launch is idempotent", replayed.eventLog == events && replayed.confirmedLitres == [3917, 0] && defaults.data(forKey: "chunk5g.live.snapshot.v2") == nil)
 
+            defaults.set(try JSONEncoder().encode(legacy), forKey: "chunk5g.live.snapshot.v2")
+            let preferredV3 = Chunk5FPrototypeStore(recoveringFrom: defaults)
+            check("Validated v3 retires stale v2", defaults.data(forKey: "chunk5g.live.snapshot.v2") == nil && preferredV3.eventLog == events && preferredV3.confirmedLitres == [3917, 0])
+
             defaults.removeObject(forKey: "chunk5g.live.snapshot.v3")
             defaults.set(Data("not-json".utf8), forKey: "chunk5g.live.snapshot.v2")
             let rejected = Chunk5FPrototypeStore(recoveringFrom: defaults)
