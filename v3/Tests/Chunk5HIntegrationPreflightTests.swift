@@ -172,6 +172,26 @@ public enum Chunk5HIntegrationPreflightTests {
             let resumed = Chunk5FPrototypeStore(recoveringFrom: endDefaults)
             check("Closed Driver interval prevents stale shift resumption", resumed.shiftLifecycle == .recoveryLocked && resumed.persistenceStatus == .fail)
         } else { lines.append("End-save-failure isolated defaults: FAIL") }
+
+        let completedSuite = "chunk5h.completed-driver-loss.\(UUID().uuidString)"
+        if let completedDefaults = UserDefaults(suiteName: completedSuite) {
+            defer { completedDefaults.removePersistentDomain(forName: completedSuite) }
+            let completedShift = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: completedDefaults)
+            completedShift.draftOpeningODO = 803_000
+            completedShift.acceptOpeningBaseline()
+            completedShift.startShift()
+            completedShift.draftClosingODO = 803_010
+            completedShift.endShift()
+            if let completedBytes = completedDefaults.data(forKey: "chunk5g.completed.previous.snapshot.v3") {
+                completedDefaults.set(completedBytes, forKey: "chunk5g.live.snapshot.v3")
+                completedDefaults.removeObject(forKey: "chunk5g.completed.previous.snapshot.v3")
+                completedDefaults.removeObject(forKey: "chunk5h.driver.ledger")
+                let locked = Chunk5FPrototypeStore(recoveringFrom: completedDefaults)
+                check("Completed relaunch without Driver file locks recovery", locked.shiftLifecycle == .recoveryLocked && locked.persistenceStatus == .fail)
+                check("Completed evidence survives Driver mismatch", completedDefaults.data(forKey: "chunk5g.live.snapshot.v3") == completedBytes && completedDefaults.data(forKey: "chunk5g.completed.previous.snapshot.v3") == nil)
+                check("Completed mismatch cannot reset as ready", locked.lastGateReport == nil && locked.shiftStartedAt == nil && locked.completedShiftLocked)
+            } else { lines.append("Completed Driver mismatch fixture archive: FAIL") }
+        } else { lines.append("Completed Driver mismatch isolated defaults: FAIL") }
         lines.append("5H FIELD GATE: AWAITING REAL WORKING SHIFT")
         return lines
     }
