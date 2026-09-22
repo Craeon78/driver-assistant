@@ -759,6 +759,9 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
             if snapshot.shiftEndedAt != nil { shiftLifecycle = .completedLocked }
             try validate(snapshot: snapshot)
+            // A validated v3 snapshot supersedes legacy v2. Retire v2 now so it
+            // cannot resurrect after the current v3 live key is later removed.
+            persistenceDefaults.removeObject(forKey: Self.legacyV2PersistenceKey)
             if snapshot.shiftEndedAt != nil {
                 try archiveCompletedSnapshot(data, snapshot: snapshot)
                 persistenceDefaults.removeObject(forKey: Self.persistenceKey)
