@@ -1316,13 +1316,16 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
     }
 
-    private func installValidated(snapshot s: Chunk5GLiveSnapshot) throws {
-        try validate(snapshot: s)
-        // The Driver file is authoritative. An interrupted two-store write may
-        // leave it ahead of the snapshot: lock instead of replaying or inventing.
+    private func validateDriverStore(snapshot s: Chunk5GLiveSnapshot) throws {
+        // The Driver file is authoritative for both active and completed shifts.
         if let persisted = s.driverLedgerEntries {
             guard driverLedger?.allEntries() == persisted else { throw CocoaError(.coderReadCorrupt) }
         }
+    }
+
+    private func installValidated(snapshot s: Chunk5GLiveSnapshot) throws {
+        try validate(snapshot: s)
+        try validateDriverStore(snapshot: s)
         let retainedVisits = s.visits.filter { !$0.isTerminalLoad }
         let normalizedRunItems: [Chunk5FRunItem]
         if let persistedRunItems = s.runItems {
@@ -1551,6 +1554,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let snapshot=try JSONDecoder().decode(Chunk5GLiveSnapshot.self,from:data)
             if snapshot.shiftEndedAt != nil { shiftLifecycle = .completedLocked }
             try validate(snapshot: snapshot)
+            try validateDriverStore(snapshot: snapshot)
             // A validated v3 snapshot supersedes legacy v2. Retire v2 now so it
             // cannot resurrect after the current v3 live key is later removed.
             persistenceDefaults.removeObject(forKey: Self.legacyV2PersistenceKey)
