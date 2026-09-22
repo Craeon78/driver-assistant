@@ -218,6 +218,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private var activeRunItemID: UUID? = nil
     private var persistedFingerprint: String? = nil
     var varianceFailureForTesting = false
+    var snapshotWriteFailureForTesting = false
 
     public static let availableProducts = ["XLS", "ULP"]
     private static let persistenceKey = "chunk5g.live.snapshot.v3"
@@ -481,6 +482,8 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
         do {
             let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            guard snapshot.shiftEndedAt == ended, snapshot.closingODO == draftClosingODO,
+                  snapshot.eventLog.last?.kind == .shiftEnd else { throw CocoaError(.coderReadCorrupt) }
             try archiveCompletedSnapshot(data, snapshot: snapshot)
             persistenceStatus = .pass
             lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
@@ -971,6 +974,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let snap = Chunk5GLiveSnapshot(evidenceSource: evidenceSource, compartments: compartments, visits: visits, eventLog: eventLog, cargoLedger: cargoLedger, reconciliationLog: reconciliationLog, openingBaselineAccepted: openingBaselineAccepted, shiftStartedAt: shiftStartedAt, shiftEndedAt: shiftEndedAt, openingODO: openingODO, closingODO: closingODO, cargoOpeningSnapshot: cargoOpeningSnapshot, unresolvedDiscrepancies: unresolvedDiscrepancies, dieselCargo: dieselCargo, ulpCargo: ulpCargo, selectedVisit: selectedVisit, selectedFill: selectedFill, restMinutes: restMinutes, loadVisitIndex: loadVisitIndex, workspace: workspace, runItems: runItems, driverLedgerEntries: driverEntries, authoritativeFingerprint: fingerprint)
         do {
             let bytes = try JSONEncoder().encode(snap)
+            if snapshotWriteFailureForTesting { throw CocoaError(.fileWriteUnknown) }
             persistenceDefaults.set(bytes, forKey: Self.persistenceKey)
             guard persistenceDefaults.data(forKey: Self.persistenceKey) == bytes else { throw CocoaError(.fileWriteUnknown) }
             persistedFingerprint = fingerprint
