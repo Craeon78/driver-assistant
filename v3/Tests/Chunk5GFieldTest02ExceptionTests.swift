@@ -207,6 +207,7 @@ public enum Chunk5GFieldTest02ExceptionTests {
             if let delivery = live.correctableCargoEvents.first(where: { $0.kind == .delivery }) {
                 live.commitCorrection(eventID: delivery.id, correctedLitres: 19_504, compartment: 0, note: "Corrected entry")
             }
+            check("Later empty boundary remains authoritative after historical correction", live.confirmedLitres.allSatisfy { $0 == 0 })
             live.commitPhysicalCheck(compartment: 0, observedLitres: 125, note: "Dip")
             live.openLoad()
             live.setDraft(compartment: 0, litres: 225)
@@ -219,7 +220,7 @@ public enum Chunk5GFieldTest02ExceptionTests {
             check("Exception snapshot relaunch validates", restored.persistenceStatus == .pass && restored.shiftLifecycle == .active)
             check("Variance facts round-trip", restoredVariance?.calculatedLitres == 19_604 && restoredVariance?.actualLitres == 19_799 && restoredVariance?.varianceLitres == 195)
             check("Correction facts round-trip", restoredCorrection?.originalLitres == 19_604 && restoredCorrection?.correctedLitres == 19_504 && restoredCorrection?.provenance == .corrected)
-            check("Physical Check facts round-trip", restoredPhysical?.calculatedLitres == 100 && restoredPhysical?.observedLitres == 125 && restoredPhysical?.differenceLitres == 25)
+            check("Later physical boundary supersedes historical correction projection", restoredPhysical?.calculatedLitres == 0 && restoredPhysical?.observedLitres == 125 && restoredPhysical?.differenceLitres == 125)
             check("Unresolved discrepancy consequence round-trips", restored.unresolvedDiscrepancies == 1)
 
             if let snapshotData = defaults.data(forKey: "chunk5g.live.snapshot.v3"),
