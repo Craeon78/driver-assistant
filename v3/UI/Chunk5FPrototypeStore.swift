@@ -1316,10 +1316,13 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         }
     }
 
-    private func validateDriverStore(snapshot s: Chunk5GLiveSnapshot) throws {
+    private func validateDriverStore(snapshot s: Chunk5GLiveSnapshot, allowLaterEntries: Bool = false) throws {
         // The Driver file is authoritative for both active and completed shifts.
         if let persisted = s.driverLedgerEntries {
-            guard driverLedger?.allEntries() == persisted else { throw CocoaError(.coderReadCorrupt) }
+            guard let current = driverLedger?.allEntries(),
+                  (allowLaterEntries ? current.starts(with: persisted) : current == persisted) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
         }
     }
 
@@ -1527,20 +1530,23 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         persistenceDefaults.removeObject(forKey: Self.legacyV2PersistenceKey)
     }
 
-    private func restoreArchivedGateReport() {
-        guard let data = persistenceDefaults.data(forKey: Self.completedPersistenceKey) else { return }
+    private func restoreArchivedGateReport() -> Bool {
+        guard let data = persistenceDefaults.data(forKey: Self.completedPersistenceKey) else { return true }
         do {
             let snapshot = try JSONDecoder().decode(Chunk5GLiveSnapshot.self, from: data)
+            try validateDriverStore(snapshot: snapshot, allowLaterEntries: true)
             lastGateReport = try gateReport(fromValidated: snapshot, persistenceStatus: .pass)
+            return true
         } catch {
-            persistenceStatus = .fail
+            persistenceStatus = .fail; shiftLifecycle = .recoveryLocked
             message = "Previous completed shift archive failed validation: \(error)"
+            return false
         }
     }
 
     private func restorePersistedLiveSnapshotOnLaunch() {
         guard evidenceSource == .live else { return }
-        restoreArchivedGateReport()
+        guard restoreArchivedGateReport() else { return }
         do {
             try migrateLegacyV2SnapshotIfRequired()
         } catch {
