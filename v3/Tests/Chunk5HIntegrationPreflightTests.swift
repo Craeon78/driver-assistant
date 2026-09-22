@@ -44,6 +44,8 @@ public enum Chunk5HIntegrationPreflightTests {
         check("0 L makes no cargo movement", shift.confirmedLitres[0] == 1_100 && shift.cargoLedger.transactions.filter { $0.kind == .unload }.count == 1)
         check("Cargo work has not become Rest", shift.eventLog.filter { $0.kind == .restStart || $0.kind == .restEnd }.isEmpty)
         check("Canonical Driver ledger remains Work through cargo", shift.driverEntries.last?.kind == .work && shift.driverEntries.last?.isOpen == true && shift.currentDailyFatigue?.openKind == .work)
+        let policy = shift.standardHours(asOf: Date().addingTimeInterval(60))
+        check("Chunk 3.5 policy consumes Driver work", policy?.activeWindows(for: .twentyFourHours).contains(where: { $0.work > 0 }) == true && policy?.historyUncertain == true)
 
         // Leave unexecuted work ahead of the two committed Driver contexts.
         shift.moveRunItem(from: IndexSet(integer: 4), to: 2)
