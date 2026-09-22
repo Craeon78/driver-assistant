@@ -147,6 +147,13 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 .disabled(!store.openingBaselineAccepted)
                 .frame(maxWidth: .infinity)
 
+                if store.hasArchivedGateReport {
+                    Button("PREVIOUS GATE REPORT") {
+                        store.presentArchivedGateReport()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
                 if !store.message.isEmpty {
                     Text(store.message).font(.caption).foregroundStyle(.secondary)
                 }
