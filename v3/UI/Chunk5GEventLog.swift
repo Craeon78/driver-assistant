@@ -110,6 +110,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
     public var deliveriesRepresented: Bool
     public var transfersRepresented: Bool
     public var reconciliationsRepresented: Bool
+    public var correctionsRepresented: Bool
     public var cargoArithmeticOK: Bool
     public var odoAnchorsOK: Bool
     public var persistenceStatus: Chunk5GCheckStatus
@@ -127,7 +128,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         cargoOpening: [Int] = [], cargoClosing: [Int] = [],
         unresolvedDiscrepancies: Int = 0,
         loadsRepresented: Bool = true, deliveriesRepresented: Bool = true,
-        transfersRepresented: Bool = true, reconciliationsRepresented: Bool = true,
+        transfersRepresented: Bool = true, reconciliationsRepresented: Bool = true, correctionsRepresented: Bool = true,
         cargoArithmeticOK: Bool = true, odoAnchorsOK: Bool = true, persistenceStatus: Chunk5GCheckStatus = .notTested,
         representationIntegrityStatus: Chunk5GCheckStatus = .notTested, operationalCompletenessStatus: Chunk5GCheckStatus = .notTested,
         plannedDeliveries: Int = 0, completedPlannedDeliveries: Int = 0
@@ -139,6 +140,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         self.unresolvedDiscrepancies = unresolvedDiscrepancies
         self.loadsRepresented = loadsRepresented; self.deliveriesRepresented = deliveriesRepresented
         self.transfersRepresented = transfersRepresented; self.reconciliationsRepresented = reconciliationsRepresented
+        self.correctionsRepresented = correctionsRepresented
         self.cargoArithmeticOK = cargoArithmeticOK; self.odoAnchorsOK = odoAnchorsOK; self.persistenceStatus = persistenceStatus
         self.representationIntegrityStatus = representationIntegrityStatus; self.operationalCompletenessStatus = operationalCompletenessStatus
         self.plannedDeliveries = plannedDeliveries; self.completedPlannedDeliveries = completedPlannedDeliveries
