@@ -44,8 +44,6 @@ public enum Chunk5HIntegrationPreflightTests {
         check("0 L makes no cargo movement", shift.confirmedLitres[0] == 1_100 && shift.cargoLedger.transactions.filter { $0.kind == .unload }.count == 1)
         check("Cargo work has not become Rest", shift.eventLog.filter { $0.kind == .restStart || $0.kind == .restEnd }.isEmpty)
         check("Canonical Driver ledger remains Work through cargo", shift.driverEntries.last?.kind == .work && shift.driverEntries.last?.isOpen == true && shift.currentDailyFatigue?.openKind == .work)
-        let policy = shift.standardHours(asOf: Date().addingTimeInterval(60))
-        check("Chunk 3.5 policy consumes Driver work", policy?.activeWindows(for: .twentyFourHours).contains(where: { $0.work > 0 }) == true && policy?.historyUncertain == true)
 
         // Leave unexecuted work ahead of the two committed Driver contexts.
         shift.moveRunItem(from: IndexSet(integer: 4), to: 2)
@@ -56,6 +54,8 @@ public enum Chunk5HIntegrationPreflightTests {
         shift.endOtherWork()
         check("Actual Rest and Work have independent anchors", shift.eventLog.filter { $0.kind == .restStart }.count == 1 && shift.eventLog.filter { $0.kind == .restEnd }.count == 1 && shift.eventLog.filter { $0.kind == .workRest }.count == 2)
         check("Other Work stays in the open Work interval", shift.driverEntries.map(\.kind) == [.work, .rest, .work] && shift.currentDailyFatigue?.openKind == .work)
+        let policy = shift.standardHours(asOf: Date().addingTimeInterval(60))
+        check("Chunk 3.5 policy consumes post-Rest Driver work", policy?.activeWindows(for: .twentyFourHours).contains(where: { $0.work > 0 }) == true && policy?.historyUncertain == true)
         let committedIDs = shift.runItems.filter(\.hasCommittedExecution).map(\.id)
         let committedPositions = shift.runItems.enumerated().filter { $0.element.hasCommittedExecution }.map { ($0.element.id, $0.offset) }
         let futureID = shift.runItems[2].id
