@@ -94,6 +94,36 @@ public enum Chunk5HIntegrationPreflightTests {
         recovered.acceptOpeningBaseline()
         recovered.startShift()
         check("Next shift retains prior Driver intervals", recovered.driverEntries.count == previousDriverEntries.count + 1 && Array(recovered.driverEntries.dropLast()) == previousDriverEntries && recovered.driverEntries.last?.kind == .work)
+
+        let legacySuite = "chunk5h.active.legacy.\(UUID().uuidString)"
+        if let legacyDefaults = UserDefaults(suiteName: legacySuite) {
+            defer { legacyDefaults.removePersistentDomain(forName: legacySuite) }
+            recovered.addSiteVisit(customer: "LEGACY", site: "UNFINISHED", fillName: "Pending", product: "XLS", plannedLitres: 100)
+            let old = Chunk5GLegacyV2Snapshot(
+                evidenceSource: .live, compartments: recovered.compartments, visits: recovered.visits,
+                eventLog: recovered.eventLog, cargoLedger: recovered.cargoLedger,
+                reconciliationLog: recovered.reconciliationLog,
+                openingBaselineAccepted: recovered.openingBaselineAccepted,
+                shiftStartedAt: recovered.shiftStartedAt, shiftEndedAt: nil,
+                openingODO: recovered.openingODO, closingODO: nil,
+                cargoOpeningSnapshot: recovered.cargoOpeningSnapshot, unresolvedDiscrepancies: 0,
+                dieselCargo: CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L"),
+                ulpCargo: CargoKind(name: "ULP", kind: "fuel.ulp", unitName: "L"),
+                selectedVisit: 0, selectedFill: 0, restMinutes: 18, loadVisitIndex: nil
+            )
+            if let original = try? JSONEncoder().encode(old) {
+                legacyDefaults.set(original, forKey: "chunk5g.live.snapshot.v2")
+                check("Active legacy fixture has no canonical Driver ledger", old.shiftStartedAt != nil && old.shiftEndedAt == nil && legacyDefaults.data(forKey: "chunk5h.driver.ledger") == nil)
+                let locked = Chunk5FPrototypeStore(recoveringFrom: legacyDefaults)
+                check("Active legacy relaunch locks recovery", locked.shiftLifecycle == .recoveryLocked && locked.persistenceStatus == .fail)
+                check("Original active legacy evidence survives", legacyDefaults.data(forKey: "chunk5g.live.snapshot.v2") == original)
+                check("No active v3 shift is installed", legacyDefaults.data(forKey: "chunk5g.live.snapshot.v3") == nil && locked.shiftStartedAt == nil && locked.eventLog.isEmpty)
+                let beforeCargo = locked.confirmedLitres
+                locked.addSiteVisit(customer: "FALSE", site: "CONTINUATION", fillName: "False", product: "XLS", plannedLitres: 1)
+                locked.openLoad(); locked.setDraft(compartment: 0, litres: 1); locked.commitLoad()
+                check("Recovery lock blocks Cargo and Run continuation", locked.workspace == .preShift && locked.runItems.isEmpty && locked.visits.isEmpty && locked.confirmedLitres == beforeCargo && locked.eventLog.isEmpty)
+            } else { lines.append("Active legacy fixture encoding: FAIL") }
+        } else { lines.append("Active legacy isolated defaults: FAIL") }
         lines.append("5H FIELD GATE: AWAITING REAL WORKING SHIFT")
         return lines
     }
