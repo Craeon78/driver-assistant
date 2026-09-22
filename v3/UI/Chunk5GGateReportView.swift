@@ -28,6 +28,7 @@ public struct Chunk5GGateReportView: View {
                     status("Representation integrity", report.representationIntegrityStatus)
                     check("Cargo arithmetic", report.cargoArithmeticOK)
                     check("ODO anchors", report.odoAnchorsOK)
+                    status("Driver ledger / fatigue feed", report.driverLedgerStatus)
                     check("Loads represented", report.loadsRepresented)
                     check("Deliveries represented", report.deliveriesRepresented)
                     check("Transfers represented", report.transfersRepresented)
