@@ -9,7 +9,11 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
     @State private var reconcileIndex = 3
     @State private var reconcileObserved = 0
     @State private var correctionIndex = 0
-    @State private var correctionDelta = 0
+    @State private var correctionEventID: UUID? = nil
+    @State private var correctionCorrectedLitres = 0
+    @State private var transactionActualLitres = 0
+    @State private var transactionPostEmpty = false
+    @State private var transactionVarianceNote = ""
 
     public init(store: Chunk5FPrototypeStore) {
         _store = StateObject(wrappedValue: store)
@@ -195,12 +199,21 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
 
     private var bottomBar: some View {
         HStack {
-            Button("SIMULATE DRIVING") { store.setPrototypeMoving(store.prototypeSpeedKmh == 0) }
+            if store.simulatedDrivingRunning {
+                Button("STOP SIMULATED DRIVING") { store.stopSimulatedDriving() }
+                    .tint(.red)
+            } else {
+                Button("START SIMULATED DRIVING") { store.startSimulatedDriving() }
+            }
             Button("OPEN NEXT SITE") { store.openNextIncompleteSite() }
                 .disabled(store.prototypeSpeedKmh > 5)
             Button("TERMINAL / LOAD") { store.openLoad() }
                 .disabled(store.prototypeSpeedKmh > 5)
-            Button("START REST") { store.beginRest() }
+            if store.isResting {
+                Button("END REST") { store.endRest() }
+            } else {
+                Button("START REST") { store.beginRest() }
+            }
             Button("RELAUNCH") { store.simulateRelaunch() }
             Button("END SHIFT") { store.endShift() }
                 .buttonStyle(.borderedProminent)
@@ -277,39 +290,66 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     }
                     .font(.caption)
 
-                    Text("Reconcile (physical)").font(.caption.bold())
+                    Text("Physical Check (driver observation)").font(.caption.bold())
                     HStack {
                         Picker("C", selection: $reconcileIndex) {
                             ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
                         }
                         TextField("Observed L", value: $reconcileObserved, format: .number)
                             .textFieldStyle(.roundedBorder).frame(width: 90).keyboardType(.numberPad)
-                        Button("CONFIRM RECONCILE") {
-                            store.commitReconciliation(compartment: reconcileIndex, observedLitres: reconcileObserved, note: "Physical observation")
+                        Button("CONFIRM PHYSICAL CHECK") {
+                            store.commitPhysicalCheck(compartment: reconcileIndex, observedLitres: reconcileObserved, note: "Driver observation")
                         }
                         .buttonStyle(.bordered)
                     }
                     .font(.caption)
 
                     Text("Correction (input error)").font(.caption.bold())
+                    Picker("Original event", selection: $correctionEventID) {
+                        Text("Select Load / Delivery").tag(Optional<UUID>.none)
+                        ForEach(store.correctableCargoEvents) { event in
+                            Text("\(event.kind.rawValue.capitalized) — \(event.committedLitres ?? 0) L")
+                                .tag(Optional(event.id))
+                        }
+                    }
                     HStack {
                         Picker("C", selection: $correctionIndex) {
                             ForEach(0..<store.compartments.count, id: \.self) { Text("C\($0+1)").tag($0) }
                         }
-                        TextField("Delta L", value: $correctionDelta, format: .number)
-                            .textFieldStyle(.roundedBorder).frame(width: 90).keyboardType(.numbersAndPunctuation)
+                        TextField("Correct total L", value: $correctionCorrectedLitres, format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 110).keyboardType(.numberPad)
                         Button("CONFIRM CORRECTION") {
-                            store.commitCorrection(compartment: correctionIndex, deltaLitres: correctionDelta, note: "Driver correction")
+                            if let eventID = correctionEventID {
+                                store.commitCorrection(eventID: eventID, correctedLitres: correctionCorrectedLitres, compartment: correctionIndex, note: "Driver correction")
+                            }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(correctionEventID == nil || correctionCorrectedLitres <= 0)
                     }
                     .font(.caption)
                 }.frame(width: 320)
             }
+            panel("TRANSACTION VARIANCE (optional)") {
+                HStack {
+                    TextField("Actual total L", value: $transactionActualLitres, format: .number)
+                        .textFieldStyle(.roundedBorder).frame(width: 130).keyboardType(.numberPad)
+                    Toggle("Truck empty after transaction", isOn: $transactionPostEmpty)
+                    TextField("Variance note", text: $transactionVarianceNote)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Text("Calculated and actual totals are both retained; variance never becomes cargo.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
-                Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") { store.commitDelivery() }
+                Button("CONFIRM \(store.deliveryMovement.formatted()) L DELIVERY") {
+                    store.commitDelivery(
+                        actualLitres: transactionActualLitres > 0 ? transactionActualLitres : nil,
+                        postTransactionEmpty: transactionActualLitres > 0 ? transactionPostEmpty : nil,
+                        varianceNote: transactionVarianceNote
+                    )
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.deliveryDraftIsValid)
             }
@@ -328,10 +368,25 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
             }
             Text("LOAD — draft only until Confirm").font(.headline)
             Chunk5FTruckCargoView(store: store, mode: .load)
+            panel("TRANSACTION VARIANCE (optional)") {
+                HStack {
+                    TextField("Actual total L", value: $transactionActualLitres, format: .number)
+                        .textFieldStyle(.roundedBorder).frame(width: 130).keyboardType(.numberPad)
+                    Toggle("Truck empty after transaction", isOn: $transactionPostEmpty)
+                    TextField("Variance note", text: $transactionVarianceNote)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
             HStack {
                 Button("UNDO") { store.undoDraft() }.buttonStyle(.bordered)
                 Spacer()
-                Button("CONFIRM LOAD") { store.commitLoad() }.buttonStyle(.borderedProminent)
+                Button("CONFIRM LOAD") {
+                    store.commitLoad(
+                        actualLitres: transactionActualLitres > 0 ? transactionActualLitres : nil,
+                        postTransactionEmpty: transactionActualLitres > 0 ? transactionPostEmpty : nil,
+                        varianceNote: transactionVarianceNote
+                    )
+                }.buttonStyle(.borderedProminent)
             }
             if !store.message.isEmpty {
                 Text(store.message).font(.caption).foregroundStyle(.secondary)
