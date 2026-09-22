@@ -91,6 +91,14 @@ public enum Chunk5GRecoveryMigrationTests {
             check("Rejected v2 bytes remain preserved", defaults.data(forKey: "chunk5g.live.snapshot.v2") == Data("not-json".utf8))
             check("Rejected migration locks mutation", rejected.shiftLifecycle == .recoveryLocked && rejected.persistenceStatus == .fail)
             check("Rejected migration does not create v3", defaults.data(forKey: "chunk5g.live.snapshot.v3") == nil)
+
+            let validV2 = try JSONEncoder().encode(legacy)
+            let rejectedV3 = Data("not-v3-json".utf8)
+            defaults.set(validV2, forKey: "chunk5g.live.snapshot.v2")
+            defaults.set(rejectedV3, forKey: "chunk5g.live.snapshot.v3")
+            let precedence = Chunk5FPrototypeStore(recoveringFrom: defaults)
+            check("Existing v3 takes precedence over v2", defaults.data(forKey: "chunk5g.live.snapshot.v3") == rejectedV3 && defaults.data(forKey: "chunk5g.live.snapshot.v2") == validV2)
+            check("Rejected current state remains locked", precedence.shiftLifecycle == .recoveryLocked && precedence.persistenceStatus == .fail)
         } catch {
             results.append("Unexpected error: FAIL — \(error)")
         }
