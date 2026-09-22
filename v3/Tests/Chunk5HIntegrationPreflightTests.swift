@@ -124,6 +124,36 @@ public enum Chunk5HIntegrationPreflightTests {
                 check("Recovery lock blocks Cargo and Run continuation", locked.workspace == .preShift && locked.runItems.isEmpty && locked.visits.isEmpty && locked.confirmedLitres == beforeCargo && locked.eventLog.isEmpty)
             } else { lines.append("Active legacy fixture encoding: FAIL") }
         } else { lines.append("Active legacy isolated defaults: FAIL") }
+
+        let priorV3Suite = "chunk5h.active.prior-v3.\(UUID().uuidString)"
+        if let priorV3Defaults = UserDefaults(suiteName: priorV3Suite) {
+            defer { priorV3Defaults.removePersistentDomain(forName: priorV3Suite) }
+            let prior = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: priorV3Defaults)
+            prior.draftOpeningODO = 801_000
+            prior.setOpeningDraft(compartment: 0, litres: 500)
+            prior.acceptOpeningBaseline()
+            prior.addSiteVisit(customer: "PRIOR", site: "ACTIVE", fillName: "Pending", product: "XLS", plannedLitres: 100)
+            prior.startShift()
+            if let currentBytes = priorV3Defaults.data(forKey: "chunk5g.live.snapshot.v3"),
+               var object = (try? JSONSerialization.jsonObject(with: currentBytes)) as? [String: Any] {
+                object.removeValue(forKey: "driverLedgerEntries")
+                do {
+                    priorV3Defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: "chunk5g.live.snapshot.v3")
+                    try prior.refingerprintPersistedSnapshotForTesting()
+                    priorV3Defaults.removeObject(forKey: "chunk5h.driver.ledger")
+                    let original = priorV3Defaults.data(forKey: "chunk5g.live.snapshot.v3")
+                    check("Active prior-v3 fixture lacks Driver history", original != nil && priorV3Defaults.data(forKey: "chunk5h.driver.ledger") == nil)
+                    let locked = Chunk5FPrototypeStore(recoveringFrom: priorV3Defaults)
+                    check("Active prior-v3 relaunch locks recovery", locked.shiftLifecycle == .recoveryLocked && locked.persistenceStatus == .fail)
+                    check("Original prior-v3 evidence survives", priorV3Defaults.data(forKey: "chunk5g.live.snapshot.v3") == original)
+                    check("No active prior-v3 shift installs", locked.shiftStartedAt == nil && locked.eventLog.isEmpty && locked.runItems.isEmpty)
+                    let beforeCargo = locked.confirmedLitres
+                    locked.addSiteVisit(customer: "FALSE", site: "CONTINUATION", fillName: "False", product: "XLS", plannedLitres: 1)
+                    locked.openLoad(); locked.setDraft(compartment: 0, litres: 1); locked.commitLoad()
+                    check("Prior-v3 recovery lock blocks Cargo and Run", locked.runItems.isEmpty && locked.visits.isEmpty && locked.confirmedLitres == beforeCargo && locked.eventLog.isEmpty)
+                } catch { lines.append("Active prior-v3 fixture sealing: FAIL") }
+            } else { lines.append("Active prior-v3 fixture encoding: FAIL") }
+        } else { lines.append("Active prior-v3 isolated defaults: FAIL") }
         lines.append("5H FIELD GATE: AWAITING REAL WORKING SHIFT")
         return lines
     }
