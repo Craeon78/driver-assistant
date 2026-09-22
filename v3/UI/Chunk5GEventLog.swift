@@ -135,6 +135,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
     public var persistenceStatus: Chunk5GCheckStatus
     public var representationIntegrityStatus: Chunk5GCheckStatus
     public var operationalCompletenessStatus: Chunk5GCheckStatus
+    public var driverLedgerStatus: Chunk5GCheckStatus
     public var plannedDeliveries: Int
     public var completedPlannedDeliveries: Int
 
@@ -150,6 +151,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         transfersRepresented: Bool = true, reconciliationsRepresented: Bool = true, correctionsRepresented: Bool = true,
         cargoArithmeticOK: Bool = true, odoAnchorsOK: Bool = true, persistenceStatus: Chunk5GCheckStatus = .notTested,
         representationIntegrityStatus: Chunk5GCheckStatus = .notTested, operationalCompletenessStatus: Chunk5GCheckStatus = .notTested,
+        driverLedgerStatus: Chunk5GCheckStatus = .notTested,
         plannedDeliveries: Int = 0, completedPlannedDeliveries: Int = 0
     ) {
         self.shiftStart = shiftStart; self.shiftEnd = shiftEnd
@@ -162,6 +164,7 @@ public struct Chunk5GGateReport: Equatable, Sendable {
         self.correctionsRepresented = correctionsRepresented
         self.cargoArithmeticOK = cargoArithmeticOK; self.odoAnchorsOK = odoAnchorsOK; self.persistenceStatus = persistenceStatus
         self.representationIntegrityStatus = representationIntegrityStatus; self.operationalCompletenessStatus = operationalCompletenessStatus
+        self.driverLedgerStatus = driverLedgerStatus
         self.plannedDeliveries = plannedDeliveries; self.completedPlannedDeliveries = completedPlannedDeliveries
     }
 }
