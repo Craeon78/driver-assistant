@@ -151,6 +151,12 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         return DailyFatigueEvaluator.evaluate(entries: ledger.allEntries(), asOf: now)
     }
     public var currentDailyFatigue: DailyFatigueSnapshot? { dailyFatigue() }
+    public func standardHours(asOf now: Date = Date()) -> StandardHoursPolicySnapshot? {
+        guard let ledger = driverLedger else { return nil }
+        let entries = ledger.allEntries()
+        let historyUncertain = entries.first.map { $0.start > now.addingTimeInterval(-14 * 24 * 3600) } ?? true
+        return StandardHoursPolicy.evaluate(entries: entries, asOf: now, historyUncertain: historyUncertain)
+    }
 
     @Published public var workspace: Chunk5FWorkspaceState = .preShift
     @Published public var visits: [Chunk5FSiteVisit] = []
