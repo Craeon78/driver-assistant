@@ -194,3 +194,26 @@ Also in this bounded repair:
 Run the distinctive-value regression after implementation, including a transaction **after** a physical reconciliation and save/relaunch reconstruction.
 
 **Branch/PR instruction:** all implementation commits for this repair must land on `chunk5g-reconciled-cargo-repair` and remain in its single repair PR. Do not create a second repair PR. Codex review, then Niles architecture/integration and Costa truth/provenance review, occur on that PR. Cory retains merge authority.
+
+
+## 9. Post-merge recovery migration repair
+
+**Status:** APPROVED / GO — 2026-09-22.
+
+PR #36 merged the reconciled-cargo repair, but two valid review findings arrived immediately after merge:
+
+1. the repaired harness reads only `chunk5g.live.snapshot.v3`, while the preceding field build wrote active shifts to `chunk5g.live.snapshot.v2`;
+2. a validated previous completed archive can be restored into `lastGateReport` without any driver-accessible way to present it.
+
+The bounded repair must:
+
+- decode the exact v2 active-shift envelope;
+- preserve reconciled cargo, Run, event chronology, ODO and shift anchors;
+- validate a temporary v3 candidate before installation;
+- write, reread and validate v3 before removing v2;
+- preserve the original v2 bytes and lock mutation when migration fails;
+- prefer an existing v3 snapshot and never overwrite it with v2;
+- make a validated archived Gate Report accessible without making completed truth mutable;
+- use isolated persistence storage for deterministic regression so tests cannot touch a real saved shift.
+
+This repair does not redesign persistence, cargo arithmetic, the Gate Report, Journal or wider 5G UX. It returns through the normal Bob → Niles → PR/Codex → merge-for-iPad-test lifecycle. Merge is not PASS.
