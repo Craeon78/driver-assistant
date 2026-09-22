@@ -140,6 +140,13 @@ struct Chunk5GLegacyV2Snapshot: Codable {
     var loadVisitIndex: Int?
 }
 
+private enum Chunk5HMigrationError: LocalizedError {
+    case activeLegacyWithoutDriverHistory
+    var errorDescription: String? {
+        "Active legacy shift has no canonical Driver Work/Rest history; original evidence is preserved for recovery."
+    }
+}
+
 @MainActor
 public final class Chunk5FPrototypeStore: ObservableObject {
     public let evidenceSource: Chunk5GEvidenceSource
@@ -1447,6 +1454,11 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
         let old = try JSONDecoder().decode(Chunk5GLegacyV2Snapshot.self, from: legacyData)
         guard old.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        // A pre-5H envelope cannot establish the missing Driver Work anchor.
+        // Refuse before writing v3 or retiring the original v2 evidence.
+        if old.shiftStartedAt != nil && old.shiftEndedAt == nil {
+            throw Chunk5HMigrationError.activeLegacyWithoutDriverHistory
+        }
 
         let derivedWorkspace: Chunk5FWorkspaceState
         if old.shiftStartedAt != nil && old.shiftEndedAt == nil {
