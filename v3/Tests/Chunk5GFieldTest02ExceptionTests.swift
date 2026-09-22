@@ -94,6 +94,15 @@ public enum Chunk5GFieldTest02ExceptionTests {
         fieldStore.commitPhysicalCheck(compartment: 2, observedLitres: 0, note: "Empty observation")
         check("Negative Physical Check reconciles current projection", fieldStore.confirmedLitres[2] == 0 && fieldStore.eventLog.last?.physicalCheck?.differenceLitres == -100)
 
+        let equalEvidenceStore = Chunk5FPrototypeStore(evidenceSource: .fixture)
+        equalEvidenceStore.startShift()
+        _ = equalEvidenceStore.openSite(0)
+        equalEvidenceStore.setDraft(compartment: 0, litres: 3_900)
+        equalEvidenceStore.commitDelivery(actualLitres: 100, postTransactionEmpty: true, varianceNote: "Meter and calculation agree; truck observed empty")
+        let equalEvidence = equalEvidenceStore.eventLog.last(where: { $0.kind == .transactionVariance })?.transactionVariance
+        check("Equal totals still retain supplied empty-state evidence", equalEvidence?.varianceLitres == 0 && equalEvidence?.postTransactionEmpty == true)
+        check("Equal-total empty evidence reconciles the whole truck", equalEvidenceStore.confirmedLitres.allSatisfy { $0 == 0 })
+
         let correctionStore = Chunk5FPrototypeStore(evidenceSource: .fixture)
         correctionStore.visits[0].fills[0].plannedLitres = 19_604
         correctionStore.startShift()
@@ -117,6 +126,8 @@ public enum Chunk5GFieldTest02ExceptionTests {
         check("Store correction links the original Delivery event", storedCorrection?.originalEventID == originalDelivery?.id)
         check("Store correction rebuilds the +100 L projection", correctionStore.confirmedLitres[0] == 100)
         check("Store correction ledger facts use corrected provenance", storedCorrection?.correctionTransactionIDs.allSatisfy { id in correctionStore.cargoLedger.transactions.first(where: { $0.id == id })?.provenance == .corrected } == true)
+        check("Gate represents correction links", correctionStore.buildLiveGateReport().correctionsRepresented)
+        check("Gate rejects orphaned correction ledger facts", !correctionStore.correctionsRepresented(events: correctionStore.eventLog.filter { $0.kind != .correction }, ledger: correctionStore.cargoLedger))
         let correctionTransactionCount = correctionStore.cargoLedger.transactions.count
         correctionStore.beginRest()
         if let originalDelivery {
@@ -124,6 +135,31 @@ public enum Chunk5GFieldTest02ExceptionTests {
         }
         check("Correction is blocked during Rest", correctionStore.isResting && correctionStore.cargoLedger.transactions.count == correctionTransactionCount && correctionStore.message.contains("only while working"))
         correctionStore.endRest()
+
+        let loadCorrectionSuite = "Chunk5GFieldTest02LoadCorrection.\(UUID().uuidString)"
+        if let defaults = UserDefaults(suiteName: loadCorrectionSuite) {
+            defer { defaults.removePersistentDomain(forName: loadCorrectionSuite) }
+            let loadCorrectionStore = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: defaults)
+            loadCorrectionStore.draftOpeningODO = 600_000
+            loadCorrectionStore.acceptOpeningBaseline()
+            loadCorrectionStore.addSiteVisit(customer: "LOAD", site: "CORRECTION", fillName: "Drop", product: "XLS", plannedLitres: 600)
+            loadCorrectionStore.startShift()
+            loadCorrectionStore.openLoad()
+            loadCorrectionStore.setDraft(compartment: 0, litres: 1_000)
+            loadCorrectionStore.commitLoad()
+            let originalLoad = loadCorrectionStore.correctableCargoEvents.first(where: { $0.kind == .load })
+            _ = loadCorrectionStore.openSite(0)
+            loadCorrectionStore.setDraft(compartment: 0, litres: 400)
+            loadCorrectionStore.commitDelivery()
+            if let originalLoad {
+                loadCorrectionStore.commitCorrection(eventID: originalLoad.id, correctedLitres: 900, compartment: 0, note: "Load entry was 100 L high")
+            }
+            check("Historical Load correction survives later Delivery", loadCorrectionStore.eventLog.last?.kind == .correction && loadCorrectionStore.confirmedLitres[0] == 300)
+            let replayedLoadCorrection = Chunk5FPrototypeStore(recoveringFrom: defaults)
+            check("Historical Load correction survives persistence replay", replayedLoadCorrection.persistenceStatus == .pass && replayedLoadCorrection.confirmedLitres[0] == 300)
+        } else {
+            results.append("Historical Load correction fixture: FAIL — unavailable UserDefaults suite")
+        }
 
         let transferStore = Chunk5FPrototypeStore(evidenceSource: .fixture)
         transferStore.startShift()
