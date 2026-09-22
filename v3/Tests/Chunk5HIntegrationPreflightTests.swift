@@ -154,6 +154,24 @@ public enum Chunk5HIntegrationPreflightTests {
                 } catch { lines.append("Active prior-v3 fixture sealing: FAIL") }
             } else { lines.append("Active prior-v3 fixture encoding: FAIL") }
         } else { lines.append("Active prior-v3 isolated defaults: FAIL") }
+
+        let endFailureSuite = "chunk5h.end-save-failure.\(UUID().uuidString)"
+        if let endDefaults = UserDefaults(suiteName: endFailureSuite) {
+            defer { endDefaults.removePersistentDomain(forName: endFailureSuite) }
+            let ending = Chunk5FPrototypeStore(evidenceSource: .live, persistenceDefaults: endDefaults)
+            ending.draftOpeningODO = 802_000
+            ending.acceptOpeningBaseline()
+            ending.startShift()
+            let activeBytes = endDefaults.data(forKey: "chunk5g.live.snapshot.v3")
+            ending.draftClosingODO = 802_012
+            ending.snapshotWriteFailureForTesting = true
+            ending.endShift()
+            check("Failed final save locks completed truth", ending.shiftLifecycle == .recoveryLocked && ending.persistenceStatus == .fail && ending.shiftEndedAt != nil)
+            check("Failed final save retains active evidence", activeBytes != nil && endDefaults.data(forKey: "chunk5g.live.snapshot.v3") == activeBytes)
+            check("Failed final save does not archive stale snapshot", endDefaults.data(forKey: "chunk5g.completed.previous.snapshot.v3") == nil && ending.lastGateReport == nil)
+            let resumed = Chunk5FPrototypeStore(recoveringFrom: endDefaults)
+            check("Closed Driver interval prevents stale shift resumption", resumed.shiftLifecycle == .recoveryLocked && resumed.persistenceStatus == .fail)
+        } else { lines.append("End-save-failure isolated defaults: FAIL") }
         lines.append("5H FIELD GATE: AWAITING REAL WORKING SHIFT")
         return lines
     }
