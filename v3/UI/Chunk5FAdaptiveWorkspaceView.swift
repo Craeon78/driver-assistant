@@ -199,8 +199,10 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                 }
                 Chunk5FRunView(store: store).frame(width: 280)
             }
-            panel("HISTORY CORRECTION (append-only)") { correctionControls }
-                .padding(.horizontal, 12)
+            if !store.isResting {
+                panel("HISTORY CORRECTION (append-only)") { correctionControls }
+                    .padding(.horizontal, 12)
+            }
         }
     }
 
@@ -311,7 +313,6 @@ public struct Chunk5FAdaptiveWorkspaceView: View {
                     }
                     .font(.caption)
 
-                    correctionControls
                 }.frame(width: 320)
             }
             panel("TRANSACTION VARIANCE (optional)") {
