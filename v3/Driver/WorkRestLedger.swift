@@ -59,19 +59,38 @@ public final class InMemoryWorkRestLedgerStore: WorkRestLedgerStore {
     }
 }
 
+/// Isolated Playgrounds regression storage; production uses the file store.
+public final class DefaultsWorkRestLedgerStore: WorkRestLedgerStore {
+    private let defaults: UserDefaults
+    private let key: String
+    public init(defaults: UserDefaults, key: String = "chunk5h.driver.ledger") {
+        self.defaults = defaults; self.key = key
+    }
+    public func load() throws -> [WorkRestEntry] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return try JSONDecoder().decode([WorkRestEntry].self, from: data)
+    }
+    public func save(_ entries: [WorkRestEntry]) throws {
+        let data = try JSONEncoder().encode(entries)
+        defaults.set(data, forKey: key)
+        guard defaults.data(forKey: key) == data else { throw WorkRestLedgerError.ioFailed("Ledger write could not be read back") }
+    }
+    public func simulateRelaunch() throws -> [WorkRestEntry] { try load() }
+}
+
 // MARK: - File-backed
 
 public final class FileWorkRestLedgerStore: WorkRestLedgerStore {
     private let fileURL: URL
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
+        e.dateEncodingStrategy = .deferredToDate
         e.outputFormatting = [.sortedKeys]
         return e
     }()
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .deferredToDate
         return d
     }()
     private var cache: [WorkRestEntry] = []
@@ -88,9 +107,11 @@ public final class FileWorkRestLedgerStore: WorkRestLedgerStore {
     }
 
     public func save(_ entries: [WorkRestEntry]) throws {
+        let data = try encoder.encode(entries)
+        do { try data.write(to: fileURL, options: .atomic) }
+        catch { throw WorkRestLedgerError.ioFailed(String(describing: error)) }
         cache = entries
         loaded = true
-        try persist()
     }
 
     public func simulateRelaunch() throws -> [WorkRestEntry] {
@@ -104,7 +125,13 @@ public final class FileWorkRestLedgerStore: WorkRestLedgerStore {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
                 let data = try Data(contentsOf: fileURL)
-                cache = try decoder.decode([WorkRestEntry].self, from: data)
+                if let modern = try? decoder.decode([WorkRestEntry].self, from: data) {
+                    cache = modern
+                } else {
+                    let legacy = JSONDecoder()
+                    legacy.dateDecodingStrategy = .iso8601
+                    cache = try legacy.decode([WorkRestEntry].self, from: data)
+                }
             } catch {
                 throw WorkRestLedgerError.decodingFailed
             }
@@ -144,8 +171,9 @@ public final class WorkRestLedger {
     /// Append a new entry. Does not close prior open entries automatically
     /// (driver authority — explicit close required).
     public func append(_ entry: WorkRestEntry) throws {
-        entries.append(entry)
-        try store.save(entries)
+        let next = entries + [entry]
+        try store.save(next)
+        entries = next
     }
 
     /// Close an open entry by id. Refuses if end < start.
@@ -159,9 +187,25 @@ public final class WorkRestLedger {
         guard end >= entries[idx].start else {
             throw WorkRestLedgerError.invalidClose("end before start")
         }
-        entries[idx].end = end
-        entries[idx].recordedAt = recordedAt
-        try store.save(entries)
+        var next = entries
+        next[idx].end = end
+        next[idx].recordedAt = recordedAt
+        try store.save(next)
+        entries = next
+    }
+
+    /// One durable write for a driver-established Work/Rest boundary.
+    public func transition(to kind: WorkRestKind, at time: Date) throws {
+        guard let open = openEntry(), open.kind != kind,
+              let index = entries.firstIndex(where: { $0.id == open.id }), time >= open.start else {
+            throw WorkRestLedgerError.invalidClose("Expected an open opposite Work/Rest entry")
+        }
+        var next = entries
+        next[index].end = time
+        next[index].recordedAt = time
+        next.append(WorkRestEntry(kind: kind, start: time, recordedAt: time))
+        try store.save(next)
+        entries = next
     }
 
     /// Explicit shift-end marker is *not* a ledger wipe.

@@ -3,6 +3,55 @@ import Foundation
 @MainActor
 public enum Chunk5GRecoveryMigrationTests {
     public static func run() -> [String] {
+        var results = ["=== V3 legacy migration under 5H Driver authority ==="]
+        func check(_ label: String, _ ok: @autoclosure () -> Bool) {
+            results.append("\(label): \(ok() ? "PASS" : "FAIL")")
+        }
+        let suite = "chunk5h.legacy.migration.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { return results + ["Isolated defaults: FAIL", "GATE FAIL"] }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        do {
+            let compartment = Chunk5FCompartment(id: 1, product: "XLS", capacityLitres: 5360)
+            let cargo = try CargoLedger(limits: [CargoCompartmentLimit(compartmentID: compartment.cargoCompartmentID, capacityUnits: 5360)])
+            let reconciliation = try CargoReconciliationLog()
+            let diesel = CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L")
+            let ulp = CargoKind(name: "ULP", kind: "fuel.ulp", unitName: "L")
+            let start = Date(timeIntervalSince1970: 1_700_000_000)
+            let visit = Chunk5FSiteVisit(customer: "LEGACY", site: "PENDING", projectedTime: "—", fills: [Chunk5FFillItem(name: "Fill", product: "XLS", plannedLitres: 100)])
+            func envelope(completed: Bool) -> Chunk5GLegacyV2Snapshot {
+                Chunk5GLegacyV2Snapshot(
+                    evidenceSource: .live, compartments: [compartment], visits: [visit],
+                    eventLog: completed
+                        ? [Chunk5GEvent(timestamp: start, kind: .shiftStart, summary: "Shift started"), Chunk5GEvent(timestamp: start.addingTimeInterval(3600), kind: .shiftEnd, summary: "Shift ended")]
+                        : [Chunk5GEvent(timestamp: start, kind: .shiftStart, summary: "Shift started")],
+                    cargoLedger: cargo, reconciliationLog: reconciliation, openingBaselineAccepted: true,
+                    shiftStartedAt: start, shiftEndedAt: completed ? start.addingTimeInterval(3600) : nil,
+                    openingODO: 100, closingODO: completed ? 120 : nil, cargoOpeningSnapshot: [0],
+                    unresolvedDiscrepancies: 0, dieselCargo: diesel, ulpCargo: ulp,
+                    selectedVisit: 0, selectedFill: 0, restMinutes: 18, loadVisitIndex: nil
+                )
+            }
+            let activeBytes = try JSONEncoder().encode(envelope(completed: false))
+            defaults.set(activeBytes, forKey: "chunk5g.live.snapshot.v2")
+            check("Active legacy has no Driver file", defaults.data(forKey: "chunk5h.driver.ledger") == nil)
+            let locked = Chunk5FPrototypeStore(recoveringFrom: defaults)
+            check("Active legacy enters recovery lock", locked.shiftLifecycle == .recoveryLocked && locked.persistenceStatus == .fail)
+            check("Active legacy bytes remain intact", defaults.data(forKey: "chunk5g.live.snapshot.v2") == activeBytes && defaults.data(forKey: "chunk5g.live.snapshot.v3") == nil)
+            locked.openLoad(); locked.addSiteVisit(customer: "FALSE", site: "CONTINUATION", fillName: "False", product: "XLS", plannedLitres: 1)
+            check("Active legacy cannot resume Cargo or Run", locked.shiftStartedAt == nil && locked.visits.isEmpty && locked.runItems.isEmpty && locked.workspace == .preShift)
+
+            defaults.removeObject(forKey: "chunk5g.live.snapshot.v2")
+            let completedBytes = try JSONEncoder().encode(envelope(completed: true))
+            defaults.set(completedBytes, forKey: "chunk5g.live.snapshot.v2")
+            let completed = Chunk5FPrototypeStore(recoveringFrom: defaults)
+            check("Completed legacy still archives", completed.shiftLifecycle == .fresh && completed.lastGateReport != nil && defaults.data(forKey: "chunk5g.live.snapshot.v2") == nil && defaults.data(forKey: "chunk5g.completed.previous.snapshot.v3") != nil)
+        } catch { results.append("Migration fixture: FAIL — \(error)") }
+        results.append(results.contains(where: { $0.contains(": FAIL") }) ? "GATE FAIL" : "GATE PASS")
+        return results
+    }
+
+    /// Historical 5G expectation before canonical Driver integration. Not a 5H gate.
+    public static func runHistorical5G() -> [String] {
         var results = ["=== V3 Chunk 5G Recovery Migration ==="]
         func check(_ label: String, _ value: @autoclosure () -> Bool) {
             results.append("\(label): \(value() ? "PASS" : "FAIL")")
