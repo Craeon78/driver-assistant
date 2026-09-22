@@ -117,6 +117,13 @@ public enum Chunk5GFieldTest02ExceptionTests {
         check("Store correction links the original Delivery event", storedCorrection?.originalEventID == originalDelivery?.id)
         check("Store correction rebuilds the +100 L projection", correctionStore.confirmedLitres[0] == 100)
         check("Store correction ledger facts use corrected provenance", storedCorrection?.correctionTransactionIDs.allSatisfy { id in correctionStore.cargoLedger.transactions.first(where: { $0.id == id })?.provenance == .corrected } == true)
+        let correctionTransactionCount = correctionStore.cargoLedger.transactions.count
+        correctionStore.beginRest()
+        if let originalDelivery {
+            correctionStore.commitCorrection(eventID: originalDelivery.id, correctedLitres: 19_404, compartment: 0, note: "Must wait until Active")
+        }
+        check("Correction is blocked during Rest", correctionStore.isResting && correctionStore.cargoLedger.transactions.count == correctionTransactionCount && correctionStore.message.contains("only while working"))
+        correctionStore.endRest()
 
         let transferStore = Chunk5FPrototypeStore(evidenceSource: .fixture)
         transferStore.startShift()
@@ -125,6 +132,25 @@ public enum Chunk5GFieldTest02ExceptionTests {
         check("Transfer remains a distinct ledger movement", transferStore.cargoLedger.transactions.last?.kind == .transfer && transferStore.eventLog.last?.kind == .transfer)
         check("Transfer conserves physical cargo", transferStore.confirmedLitres.reduce(0, +) == transferTotalBefore)
         check("Transfer is not an exception substitute", transferStore.eventLog.last?.transactionVariance == nil && transferStore.eventLog.last?.physicalCheck == nil && transferStore.eventLog.last?.inputCorrection == nil)
+
+        do {
+            var legacyLog = try CargoReconciliationLog()
+            let compartment = transferStore.compartments[0]
+            let boundary = CargoReconciliationEvent(
+                compartmentID: compartment.cargoCompartmentID,
+                cargo: CargoKind(name: "Diesel", kind: "fuel.diesel", unitName: "L"),
+                calculatedUnitsBefore: 100,
+                confirmedPhysicalUnitsAfter: 0,
+                occurredAt: Date(),
+                provenance: .driverEntered,
+                note: "CORRECTION: legacy input repair"
+            )
+            try legacyLog.append(boundary)
+            let legacyEvents = [Chunk5GEvent(kind: .correction, summary: "Cargo correction C1", detail: "-100 L")]
+            check("Payload-less legacy correction represents its boundary", transferStore.reconciliationsRepresented(events: legacyEvents, log: legacyLog))
+        } catch {
+            results.append("Legacy correction representation: FAIL — \(error)")
+        }
 
         let suite = "Chunk5GFieldTest02ExceptionTests.\(UUID().uuidString)"
         if let defaults = UserDefaults(suiteName: suite) {
@@ -146,15 +172,19 @@ public enum Chunk5GFieldTest02ExceptionTests {
                 live.commitCorrection(eventID: delivery.id, correctedLitres: 19_504, compartment: 0, note: "Corrected entry")
             }
             live.commitPhysicalCheck(compartment: 0, observedLitres: 125, note: "Dip")
+            live.openLoad()
+            live.setDraft(compartment: 0, litres: 225)
+            live.commitLoad(actualLitres: 101, postTransactionEmpty: false, varianceNote: "Awaiting resolution")
 
             let restored = Chunk5FPrototypeStore(recoveringFrom: defaults)
-            let restoredVariance = restored.eventLog.last(where: { $0.kind == .transactionVariance })?.transactionVariance
+            let restoredVariance = restored.eventLog.first(where: { $0.transactionVariance?.calculatedLitres == 19_604 })?.transactionVariance
             let restoredCorrection = restored.eventLog.last(where: { $0.kind == .correction })?.inputCorrection
             let restoredPhysical = restored.eventLog.last(where: { $0.kind == .physicalCheck })?.physicalCheck
             check("Exception snapshot relaunch validates", restored.persistenceStatus == .pass && restored.shiftLifecycle == .active)
             check("Variance facts round-trip", restoredVariance?.calculatedLitres == 19_604 && restoredVariance?.actualLitres == 19_799 && restoredVariance?.varianceLitres == 195)
             check("Correction facts round-trip", restoredCorrection?.originalLitres == 19_604 && restoredCorrection?.correctedLitres == 19_504 && restoredCorrection?.provenance == .corrected)
             check("Physical Check facts round-trip", restoredPhysical?.calculatedLitres == 100 && restoredPhysical?.observedLitres == 125 && restoredPhysical?.differenceLitres == 25)
+            check("Unresolved discrepancy consequence round-trips", restored.unresolvedDiscrepancies == 1)
 
             if let snapshotData = defaults.data(forKey: "chunk5g.live.snapshot.v3"),
                var root = try? JSONSerialization.jsonObject(with: snapshotData) as? [String: Any],
@@ -172,6 +202,19 @@ public enum Chunk5GFieldTest02ExceptionTests {
                     check("Structured exception tamper is rejected", rejected.persistenceStatus == .fail && rejected.shiftLifecycle == .recoveryLocked)
                 } else {
                     results.append("Structured exception tamper is rejected: FAIL — JSON rewrite failed")
+                }
+
+                if var counterRoot = try? JSONSerialization.jsonObject(with: snapshotData) as? [String: Any] {
+                    counterRoot["unresolvedDiscrepancies"] = 0
+                    if let counterTampered = try? JSONSerialization.data(withJSONObject: counterRoot) {
+                        defaults.set(counterTampered, forKey: "chunk5g.live.snapshot.v3")
+                        let counterRejected = Chunk5FPrototypeStore(recoveringFrom: defaults)
+                        check("False-zero discrepancy tamper is rejected", counterRejected.persistenceStatus == .fail && counterRejected.shiftLifecycle == .recoveryLocked)
+                    } else {
+                        results.append("False-zero discrepancy tamper is rejected: FAIL — JSON rewrite failed")
+                    }
+                } else {
+                    results.append("False-zero discrepancy tamper is rejected: FAIL — snapshot decode failed")
                 }
             } else {
                 results.append("Structured exception tamper is rejected: FAIL — persisted payload unavailable")
