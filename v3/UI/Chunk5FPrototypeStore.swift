@@ -643,7 +643,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             kind: .correction, cargo: target.cargo, units: target.units,
             sourceCompartmentID: target.destinationCompartmentID,
             destinationCompartmentID: target.sourceCompartmentID,
-            occurredAt: now, recordedAt: now, provenance: .driverEntered,
+            occurredAt: now, recordedAt: now, provenance: .corrected,
             correctsTransactionID: target.id, note: correctionOperationID
         )
         let replacement = CargoTransaction(
@@ -651,7 +651,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             sourceCompartmentID: target.sourceCompartmentID,
             destinationCompartmentID: target.destinationCompartmentID,
             occurredAt: now.addingTimeInterval(0.001), recordedAt: now,
-            provenance: .driverEntered, note: correctionOperationID
+            provenance: .corrected, note: correctionOperationID
         )
         var candidate = cargoLedger
         do {
@@ -664,7 +664,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 correctedLitres: correctedLitres,
                 compartmentAdjustments: [Chunk5GCompartmentAdjustment(compartmentIndex: index, deltaLitres: deltaLitres)],
                 correctionTransactionIDs: [reversal.id, replacement.id],
-                provenance: .driverEntered,
+                provenance: .corrected,
                 note: note.isEmpty ? nil : note
             )
             appendEvent(
@@ -715,13 +715,58 @@ public final class Chunk5FPrototypeStore: ObservableObject {
 
     // MARK: - Persistence / gate
 
+    private func stableJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        return (try? encoder.encode(value).base64EncodedString()) ?? "ENCODING-FAILED"
+    }
+
+    /// Keeps the exact legacy history fingerprint for events without Field Test 02
+    /// payloads, while covering every structured exception fact and its linked
+    /// authoritative records for new snapshots.
+    private func historyFingerprint(
+        events: [Chunk5GEvent],
+        ledger: CargoLedger,
+        reconciliationLog: CargoReconciliationLog
+    ) -> String {
+        events.map { event in
+            let legacy = "\(event.id.uuidString):\(event.kind.rawValue):\(event.summary):\(event.detail)"
+            var exceptionFacts: [String] = []
+            if event.relatedOperationID != nil || event.committedLitres != nil || event.transactionVariance != nil || event.physicalCheck != nil || event.inputCorrection != nil {
+                exceptionFacts.append("eventMeta=\(stableJSON([event.relatedOperationID ?? "", event.committedLitres.map(String.init) ?? ""]))")
+            }
+            if let variance = event.transactionVariance {
+                let linked = reconciliationLog.events.filter { variance.reconciliationEventIDs.contains($0.id) }
+                let transactionIDs = Set(linked.compactMap(\.relatedCargoTransactionID))
+                let linkedTransactions = ledger.transactions.filter { transactionIDs.contains($0.id) }
+                exceptionFacts.append("variance=\(stableJSON(variance))")
+                exceptionFacts.append("varianceLinks=\(stableJSON(linked))")
+                exceptionFacts.append("varianceTransactions=\(stableJSON(linkedTransactions))")
+            }
+            if let physical = event.physicalCheck {
+                let linked = reconciliationLog.events.filter { $0.id == physical.reconciliationEventID }
+                exceptionFacts.append("physical=\(stableJSON(physical))")
+                exceptionFacts.append("physicalLinks=\(stableJSON(linked))")
+            }
+            if let correction = event.inputCorrection {
+                let correctionTransactions = ledger.transactions.filter { correction.correctionTransactionIDs.contains($0.id) }
+                let targetIDs = Set(correctionTransactions.compactMap(\.correctsTransactionID))
+                let linked = ledger.transactions.filter { correction.correctionTransactionIDs.contains($0.id) || targetIDs.contains($0.id) }
+                exceptionFacts.append("correction=\(stableJSON(correction))")
+                exceptionFacts.append("correctionLinks=\(stableJSON(linked))")
+            }
+            return exceptionFacts.isEmpty ? legacy : legacy + "::" + exceptionFacts.joined(separator: ";")
+        }.joined(separator: "||")
+    }
+
     private func authoritativeFingerprint() -> String {
         let cargo = confirmedLitres.map(String.init).joined(separator: ",")
         let run = visits.map { v in
             let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
-        let history = eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        let history = historyFingerprint(events: eventLog, ledger: cargoLedger, reconciliationLog: reconciliationLog)
         return cargo + "##" + run + "##" + history
     }
 
@@ -732,8 +777,141 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         do { persistenceDefaults.set(try JSONEncoder().encode(snap), forKey: Self.persistenceKey); persistedFingerprint = fingerprint } catch { message = "Snapshot save failed: \(error)" }
     }
 
+    private func validateExceptionFacts(
+        events: [Chunk5GEvent],
+        ledger: CargoLedger,
+        reconciliationLog: CargoReconciliationLog,
+        compartments: [Chunk5FCompartment]
+    ) throws {
+        let transactionByID = Dictionary(uniqueKeysWithValues: ledger.transactions.map { ($0.id, $0) })
+        let reconciliationByID = Dictionary(uniqueKeysWithValues: reconciliationLog.events.map { ($0.id, $0) })
+
+        for event in events {
+            if event.kind == .load || event.kind == .delivery {
+                if event.relatedOperationID != nil || event.committedLitres != nil {
+                    guard let operationID = event.relatedOperationID,
+                          let committedLitres = event.committedLitres,
+                          committedLitres > 0 else { throw CocoaError(.coderReadCorrupt) }
+                    let transactionKind: CargoTransactionKind = event.kind == .load ? .load : .unload
+                    let operationRows = ledger.transactions.filter { $0.kind == transactionKind && $0.note == operationID }
+                    guard !operationRows.isEmpty,
+                          Int(operationRows.reduce(0) { $0 + $1.units }.rounded()) == committedLitres else {
+                        throw CocoaError(.coderReadCorrupt)
+                    }
+                }
+            }
+            if event.kind == .transactionVariance, event.transactionVariance == nil { throw CocoaError(.coderReadCorrupt) }
+            if event.kind == .physicalCheck, event.physicalCheck == nil { throw CocoaError(.coderReadCorrupt) }
+            if event.kind == .correction,
+               (event.relatedOperationID != nil || event.committedLitres != nil),
+               event.inputCorrection == nil { throw CocoaError(.coderReadCorrupt) }
+
+            if let variance = event.transactionVariance {
+                guard event.kind == .transactionVariance,
+                      variance.calculatedLitres > 0,
+                      variance.actualLitres > 0,
+                      variance.varianceLitres == variance.actualLitres - variance.calculatedLitres,
+                      variance.varianceLitres != 0,
+                      event.committedLitres == variance.actualLitres,
+                      let operationID = event.relatedOperationID,
+                      events.contains(where: {
+                          ($0.kind == .load || $0.kind == .delivery) &&
+                          $0.relatedOperationID == operationID &&
+                          $0.committedLitres == variance.calculatedLitres
+                      }),
+                      Set(variance.reconciliationEventIDs).count == variance.reconciliationEventIDs.count else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                let boundaries = try variance.reconciliationEventIDs.map { id -> CargoReconciliationEvent in
+                    guard let boundary = reconciliationByID[id] else { throw CocoaError(.coderReadCorrupt) }
+                    return boundary
+                }
+                if variance.postTransactionEmpty == true {
+                    guard !boundaries.isEmpty,
+                          boundaries.allSatisfy({ abs($0.confirmedPhysicalUnitsAfter) < 0.000001 }),
+                          boundaries.allSatisfy({ $0.provenance == variance.provenance }),
+                          abs(boundaries.compactMap(\.observedMovementVariance).reduce(0, +) - Double(variance.varianceLitres)) < 0.000001,
+                          boundaries.contains(where: { boundary in
+                              guard let id = boundary.relatedCargoTransactionID,
+                                    let transaction = transactionByID[id] else { return false }
+                              return transaction.note == operationID
+                          }) else { throw CocoaError(.coderReadCorrupt) }
+                } else {
+                    guard boundaries.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+                }
+            }
+
+            if let physical = event.physicalCheck {
+                guard event.kind == .physicalCheck,
+                      compartments.indices.contains(physical.compartmentIndex),
+                      physical.calculatedLitres >= 0,
+                      physical.observedLitres >= 0,
+                      physical.differenceLitres == physical.observedLitres - physical.calculatedLitres,
+                      let boundary = reconciliationByID[physical.reconciliationEventID],
+                      boundary.compartmentID == compartments[physical.compartmentIndex].cargoCompartmentID,
+                      abs(boundary.calculatedUnitsBefore - Double(physical.calculatedLitres)) < 0.000001,
+                      abs(boundary.confirmedPhysicalUnitsAfter - Double(physical.observedLitres)) < 0.000001,
+                      boundary.provenance == physical.provenance else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+            }
+
+            if let correction = event.inputCorrection {
+                guard event.kind == .correction,
+                      correction.provenance == .corrected,
+                      correction.originalLitres > 0,
+                      correction.correctedLitres > 0,
+                      correction.deltaLitres == correction.correctedLitres - correction.originalLitres,
+                      correction.compartmentAdjustments.count == 1,
+                      correction.compartmentAdjustments.reduce(0, { $0 + $1.deltaLitres }) == correction.deltaLitres,
+                      correction.compartmentAdjustments.allSatisfy({ compartments.indices.contains($0.compartmentIndex) }),
+                      Set(correction.compartmentAdjustments.map(\.compartmentIndex)).count == correction.compartmentAdjustments.count,
+                      correction.correctionTransactionIDs.count == 2,
+                      Set(correction.correctionTransactionIDs).count == 2,
+                      event.committedLitres == correction.correctedLitres,
+                      let correctionOperationID = event.relatedOperationID,
+                      let original = events.first(where: { $0.id == correction.originalEventID }),
+                      original.kind == .load || original.kind == .delivery,
+                      original.timestamp <= event.timestamp,
+                      original.committedLitres == correction.originalLitres,
+                      let originalOperationID = original.relatedOperationID,
+                      let reversal = transactionByID[correction.correctionTransactionIDs[0]],
+                      let replacement = transactionByID[correction.correctionTransactionIDs[1]],
+                      reversal.kind == .correction,
+                      reversal.provenance == .corrected,
+                      replacement.provenance == .corrected,
+                      reversal.note == correctionOperationID,
+                      replacement.note == correctionOperationID,
+                      let correctedTargetID = reversal.correctsTransactionID,
+                      let correctedTarget = transactionByID[correctedTargetID],
+                      correctedTarget.note == originalOperationID,
+                      correctedTarget.kind == (original.kind == .load ? .load : .unload),
+                      replacement.kind == correctedTarget.kind,
+                      replacement.cargo == correctedTarget.cargo,
+                      replacement.sourceCompartmentID == correctedTarget.sourceCompartmentID,
+                      replacement.destinationCompartmentID == correctedTarget.destinationCompartmentID,
+                      reversal.units == correctedTarget.units,
+                      reversal.sourceCompartmentID == correctedTarget.destinationCompartmentID,
+                      reversal.destinationCompartmentID == correctedTarget.sourceCompartmentID else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                let compartmentAdjustment = correction.compartmentAdjustments[0]
+                let adjustedCompartmentID = compartments[compartmentAdjustment.compartmentIndex].cargoCompartmentID
+                let targetCompartmentID = correctedTarget.kind == .load ? correctedTarget.destinationCompartmentID : correctedTarget.sourceCompartmentID
+                guard targetCompartmentID == adjustedCompartmentID,
+                      abs(replacement.units - (correctedTarget.units + Double(compartmentAdjustment.deltaLitres))) < 0.000001 else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+            }
+
+            let structuredPayloadCount = [event.transactionVariance != nil, event.physicalCheck != nil, event.inputCorrection != nil].filter { $0 }.count
+            guard structuredPayloadCount <= 1 else { throw CocoaError(.coderReadCorrupt) }
+        }
+    }
+
     private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
         guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
+        try validateExceptionFacts(events: s.eventLog, ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog, compartments: s.compartments)
         for c in s.compartments {
             _ = try CargoStateReconciler.currentState(
                 ledger: s.cargoLedger,
@@ -753,7 +931,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
-        let history = s.eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        let history = historyFingerprint(events: s.eventLog, ledger: s.cargoLedger, reconciliationLog: s.reconciliationLog)
         guard cargo + "##" + run + "##" + history == s.authoritativeFingerprint else {
             throw CocoaError(.coderReadCorrupt)
         }
@@ -843,7 +1021,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let fills = v.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
             return "\(v.id.uuidString):\(v.customer):\(v.site):\(v.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
-        let history = eventLog.map { "\($0.id.uuidString):\($0.kind.rawValue):\($0.summary):\($0.detail)" }.joined(separator: "||")
+        let history = historyFingerprint(events: eventLog, ledger: ledger, reconciliationLog: reconciliationLog)
         return cargo + "##" + run + "##" + history
     }
 
