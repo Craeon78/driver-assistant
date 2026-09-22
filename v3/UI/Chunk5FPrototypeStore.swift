@@ -496,7 +496,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
                 for fi in visits[vi].fills.indices { visits[vi].fills[fi].completed = true }
             }
             appendEvent(.load, "Load confirmed", "\(added) L", relatedOperationID: operationID, committedLitres: added)
-            try recordTransactionVarianceIfRequired(calculatedLitres: added, actualLitres: actualLitres, postTransactionEmpty: postTransactionEmpty, operationID: operationID, product: nil, note: varianceNote)
+            try recordTransactionVarianceIfRequired(calculatedLitres: added, actualLitres: actualLitres, postTransactionEmpty: postTransactionEmpty, operationID: operationID, note: varianceNote)
             resetDraft(); loadVisitIndex = nil; workspace = .active
             message = "Load committed: \(added) L."; persistLiveSnapshot()
         } catch { message = "Load not committed: \(error)" }
@@ -521,7 +521,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let identity = "\(visits[selectedVisit].customer) — \(visits[selectedVisit].site) / \(fill.name)"
             visits[selectedVisit].fills[selectedFill].completed = true
             appendEvent(.delivery, "Delivery \(delivered) L", "\(identity); \(fill.product)", relatedOperationID: operationID, committedLitres: delivered)
-            try recordTransactionVarianceIfRequired(calculatedLitres: delivered, actualLitres: actualLitres, postTransactionEmpty: postTransactionEmpty, operationID: operationID, product: fill.product, note: varianceNote)
+            try recordTransactionVarianceIfRequired(calculatedLitres: delivered, actualLitres: actualLitres, postTransactionEmpty: postTransactionEmpty, operationID: operationID, note: varianceNote)
             resetDraft()
             _ = advanceToNextFillAtSite()
             message = visits[selectedVisit].isComplete ? "Delivery committed: \(delivered) L. Site visit complete." : "Delivery committed: \(delivered) L. Next fill ready."
@@ -529,13 +529,15 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         } catch { message = "Delivery not committed: \(error)" }
     }
 
-    private func recordTransactionVarianceIfRequired(calculatedLitres: Int, actualLitres: Int?, postTransactionEmpty: Bool?, operationID: String, product: String?, note: String) throws {
+    private func recordTransactionVarianceIfRequired(calculatedLitres: Int, actualLitres: Int?, postTransactionEmpty: Bool?, operationID: String, note: String) throws {
         guard let actualLitres, actualLitres > 0, actualLitres != calculatedLitres else { return }
         let variance = actualLitres - calculatedLitres
         var reconciliationIDs: [CanonicalID] = []
 
         if postTransactionEmpty == true {
-            let eligible = compartments.indices.filter { product == nil || compartments[$0].product == product }
+            // "Truck empty" is whole-vehicle physical evidence, not a statement
+            // about only the product involved in the transaction.
+            let eligible = Array(compartments.indices)
             guard let first = eligible.first else { throw CargoReconciliationError.unknownCompartment }
             let relatedTransactionID = cargoLedger.transactions.first(where: { $0.note == operationID })?.id
             var varianceAttached = false
