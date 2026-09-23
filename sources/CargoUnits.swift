@@ -1,12 +1,22 @@
+import Foundation
 
-// Placeholder transport abstraction
+struct QuantityValue: Codable, Hashable {
+    let amount: Double
+    let unitCode: String
+}
 
-// Will later represent:
+struct CargoUnit: Identifiable, Codable, Hashable {
+    let id: String
+    var capacity: QuantityValue?
+    var quantity: QuantityValue?
+    var massKg: Double?
+    var longitudinalPositionMetres: Double?
+}
 
-// - fuel compartments
-
-// - pallet slots
-
-// - livestock pens
-
-// - container positions
+struct CargoModule: Identifiable, Codable, Hashable {
+    let id: String
+    var units: [CargoUnit]
+    var isFixed: Bool
+    var isSwapCapable: Bool
+    var isTransferCapable: Bool
+}
