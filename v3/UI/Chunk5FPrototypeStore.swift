@@ -224,7 +224,219 @@ public final class Chunk5FPrototypeStore: ObservableObject {
     private static let persistenceKey = "chunk5g.live.snapshot.v3"
     private static let legacyV2PersistenceKey = "chunk5g.live.snapshot.v2"
     private static let completedPersistenceKey = "chunk5g.completed.previous.snapshot.v3"
-
+    public struct RecoveryDiagnostic: Sendable {
+        public let liveSnapshotExists: Bool
+        public let liveSnapshotBytes: Int
+        public let jsonReadable: Bool
+        public let snapshotDecodes: Bool
+        public let snapshotValidates: Bool
+        public let driverEvidenceValidates: Bool?
+        public let exceptionFactsValidate: Bool?
+        public let driverStoreValidates: Bool
+        public let snapshotDriverEntryCount: Int?
+        public let currentDriverEntryCount: Int?
+        public let failureStage: String?
+        public let failureDetail: String?
+    }
+    
+     public func recoveryDiagnostic() -> RecoveryDiagnostic {
+        guard let data = persistenceDefaults.data(forKey: Self.persistenceKey) else {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: false,
+                liveSnapshotBytes: 0,
+                jsonReadable: false,
+                snapshotDecodes: false,
+                snapshotValidates: false,
+                driverEvidenceValidates: nil,
+                exceptionFactsValidate: nil,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: nil,
+                currentDriverEntryCount: driverLedger?.allEntries().count,
+                failureStage: "snapshot",
+                failureDetail: "No persisted v3 live snapshot exists."
+            )
+        }
+        
+        let byteCount = data.count
+        
+        do {
+            _ = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: false,
+                snapshotDecodes: false,
+                snapshotValidates: false,
+                driverEvidenceValidates: nil,
+                exceptionFactsValidate: nil,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: nil,
+                currentDriverEntryCount: driverLedger?.allEntries().count,
+                failureStage: "JSON",
+                failureDetail: String(describing: error)
+            )
+        }
+        
+        let snapshot: Chunk5GLiveSnapshot
+        
+        do {
+            snapshot = try JSONDecoder().decode(
+                Chunk5GLiveSnapshot.self,
+                from: data
+            )
+        } catch {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: true,
+                snapshotDecodes: false,
+                snapshotValidates: false,
+                driverEvidenceValidates: nil,
+                exceptionFactsValidate: nil,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: nil,
+                currentDriverEntryCount: driverLedger?.allEntries().count,
+                failureStage: "decode",
+                failureDetail: String(describing: error)
+            )
+        }
+        
+        let snapshotDriverCount = snapshot.driverLedgerEntries?.count
+        let currentDriverCount = driverLedger?.allEntries().count
+        
+        // Stage 1 — canonical Driver evidence inside the snapshot.
+        let driverEvidenceOK: Bool
+        
+        if let entries = snapshot.driverLedgerEntries,
+           let started = snapshot.shiftStartedAt {
+            
+            driverEvidenceOK = driverEvidenceValid(
+                entries: entries,
+                events: snapshot.eventLog,
+                started: started,
+                ended: snapshot.shiftEndedAt,
+                workspace: snapshot.workspace
+            )
+        } else if snapshot.shiftStartedAt != nil &&
+                    snapshot.shiftEndedAt == nil {
+            
+            driverEvidenceOK = false
+        } else {
+            driverEvidenceOK = true
+        }
+        
+        if !driverEvidenceOK {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: true,
+                snapshotDecodes: true,
+                snapshotValidates: false,
+                driverEvidenceValidates: false,
+                exceptionFactsValidate: nil,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: snapshotDriverCount,
+                currentDriverEntryCount: currentDriverCount,
+                failureStage: "Driver evidence",
+                failureDetail:
+                    "Snapshot Driver Work/Rest evidence is internally inconsistent with shift boundaries, Rest events, or workspace state."
+            )
+        }
+        
+        // Stage 2 — structured exception / delivery / correction evidence.
+        do {
+            try validateExceptionFacts(
+                events: snapshot.eventLog,
+                ledger: snapshot.cargoLedger,
+                reconciliationLog: snapshot.reconciliationLog,
+                compartments: snapshot.compartments
+            )
+        } catch {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: true,
+                snapshotDecodes: true,
+                snapshotValidates: false,
+                driverEvidenceValidates: true,
+                exceptionFactsValidate: false,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: snapshotDriverCount,
+                currentDriverEntryCount: currentDriverCount,
+                failureStage: "Exception facts",
+                failureDetail: String(describing: error)
+            )
+        }
+        
+        // Stage 3 — complete snapshot validation. If this now fails, the fault
+        // lies after Driver evidence and exception validation: Run Item /
+        // delivery structure, cargo reconciliation, or persistence fingerprint.
+        do {
+            try validate(snapshot: snapshot)
+        } catch {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: true,
+                snapshotDecodes: true,
+                snapshotValidates: false,
+                driverEvidenceValidates: true,
+                exceptionFactsValidate: true,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: snapshotDriverCount,
+                currentDriverEntryCount: currentDriverCount,
+                failureStage: "Snapshot structural/fingerprint validation",
+                failureDetail: String(describing: error)
+            )
+        }
+        
+        // Stage 4 — compare snapshot Driver ledger with the separately persisted
+        // canonical Driver ledger.
+        do {
+            try validateDriverStore(snapshot: snapshot)
+        } catch {
+            return RecoveryDiagnostic(
+                liveSnapshotExists: true,
+                liveSnapshotBytes: byteCount,
+                jsonReadable: true,
+                snapshotDecodes: true,
+                snapshotValidates: true,
+                driverEvidenceValidates: true,
+                exceptionFactsValidate: true,
+                driverStoreValidates: false,
+                snapshotDriverEntryCount: snapshotDriverCount,
+                currentDriverEntryCount: currentDriverCount,
+                failureStage: "Driver ledger comparison",
+                failureDetail: String(describing: error)
+            )
+        }
+        
+        return RecoveryDiagnostic(
+            liveSnapshotExists: true,
+            liveSnapshotBytes: byteCount,
+            jsonReadable: true,
+            snapshotDecodes: true,
+            snapshotValidates: true,
+            driverEvidenceValidates: true,
+            exceptionFactsValidate: true,
+            driverStoreValidates: true,
+            snapshotDriverEntryCount: snapshotDriverCount,
+            currentDriverEntryCount: currentDriverCount,
+            failureStage: nil,
+            failureDetail: nil
+        )
+    }
+    
+    public func recoveryRawJSON() -> String {
+        guard let data = persistenceDefaults.data(forKey: Self.persistenceKey) else {
+            return "No persisted v3 live snapshot exists."
+        }
+        
+        return String(data: data, encoding: .utf8)
+        ?? "Persisted snapshot is not valid UTF-8 text."
+    }
+    
     public convenience init() {
         self.init(evidenceSource: .live, persistenceDefaults: .standard)
         restorePersistedLiveSnapshotOnLaunch()
@@ -914,38 +1126,137 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         ledger: CargoLedger,
         reconciliationLog: CargoReconciliationLog
     ) -> String {
-        events.map { event in
-            let legacy = "\(event.id.uuidString):\(event.kind.rawValue):\(event.summary):\(event.detail)"
-            var exceptionFacts: [String] = []
-            if event.relatedOperationID != nil || event.relatedRunItemID != nil || event.committedLitres != nil || event.transactionVariance != nil || event.physicalCheck != nil || event.inputCorrection != nil || event.deliveryOutcome != nil {
-                let metadata = event.relatedRunItemID == nil
-                    ? [event.relatedOperationID ?? "", event.committedLitres.map(String.init) ?? ""]
-                    : [event.relatedOperationID ?? "", event.relatedRunItemID?.uuidString ?? "", event.committedLitres.map(String.init) ?? ""]
-                exceptionFacts.append("eventMeta=\(stableJSON(metadata))")
+        var parts: [String] = []
+        parts.reserveCapacity(events.count)
+        
+        for event in events {
+            let part = historyFingerprintForEvent(
+                event,
+                ledger: ledger,
+                reconciliationLog: reconciliationLog
+            )
+            parts.append(part)
+        }
+        
+        return parts.joined(separator: "||")
+    }
+    
+    private func historyFingerprintForEvent(
+        _ event: Chunk5GEvent,
+        ledger: CargoLedger,
+        reconciliationLog: CargoReconciliationLog
+    ) -> String {
+        var legacy = event.id.uuidString
+        legacy.append(":")
+        legacy.append(event.kind.rawValue)
+        legacy.append(":")
+        legacy.append(event.summary)
+        legacy.append(":")
+        legacy.append(event.detail)
+        
+        var exceptionFacts: [String] = []
+        
+        let hasOperationID = event.relatedOperationID != nil
+        let hasRunItemID = event.relatedRunItemID != nil
+        let hasCommittedLitres = event.committedLitres != nil
+        let hasVariance = event.transactionVariance != nil
+        let hasPhysicalCheck = event.physicalCheck != nil
+        let hasCorrection = event.inputCorrection != nil
+        let hasDeliveryOutcome = event.deliveryOutcome != nil
+        
+        let hasMetadata =
+        hasOperationID ||
+        hasRunItemID ||
+        hasCommittedLitres ||
+        hasVariance ||
+        hasPhysicalCheck ||
+        hasCorrection ||
+        hasDeliveryOutcome
+        
+        if hasMetadata {
+            var metadata: [String] = []
+            metadata.append(event.relatedOperationID ?? "")
+            
+            if let runItemID = event.relatedRunItemID {
+                metadata.append(runItemID.uuidString)
             }
-            if let variance = event.transactionVariance {
-                let linked = reconciliationLog.events.filter { variance.reconciliationEventIDs.contains($0.id) }
-                let transactionIDs = Set(linked.compactMap(\.relatedCargoTransactionID))
-                let linkedTransactions = ledger.transactions.filter { transactionIDs.contains($0.id) }
-                exceptionFacts.append("variance=\(stableJSON(variance))")
-                exceptionFacts.append("varianceLinks=\(stableJSON(linked))")
-                exceptionFacts.append("varianceTransactions=\(stableJSON(linkedTransactions))")
+            
+            if let litres = event.committedLitres {
+                metadata.append(String(litres))
+            } else {
+                metadata.append("")
             }
-            if let physical = event.physicalCheck {
-                let linked = reconciliationLog.events.filter { $0.id == physical.reconciliationEventID }
-                exceptionFacts.append("physical=\(stableJSON(physical))")
-                exceptionFacts.append("physicalLinks=\(stableJSON(linked))")
+            
+            let encodedMetadata = stableJSON(metadata)
+            exceptionFacts.append("eventMeta=" + encodedMetadata)
+        }
+        
+        if let variance = event.transactionVariance {
+            let linked = reconciliationLog.events.filter { boundary in
+                variance.reconciliationEventIDs.contains(boundary.id)
             }
-            if let correction = event.inputCorrection {
-                let correctionTransactions = ledger.transactions.filter { correction.correctionTransactionIDs.contains($0.id) }
-                let targetIDs = Set(correctionTransactions.compactMap(\.correctsTransactionID))
-                let linked = ledger.transactions.filter { correction.correctionTransactionIDs.contains($0.id) || targetIDs.contains($0.id) }
-                exceptionFacts.append("correction=\(stableJSON(correction))")
-                exceptionFacts.append("correctionLinks=\(stableJSON(linked))")
+            
+            var transactionIDs = Set<CanonicalID>()
+            for boundary in linked {
+                if let transactionID = boundary.relatedCargoTransactionID {
+                    transactionIDs.insert(transactionID)
+                }
             }
-            if let outcome = event.deliveryOutcome { exceptionFacts.append("deliveryOutcome=\(stableJSON(outcome))") }
-            return exceptionFacts.isEmpty ? legacy : legacy + "::" + exceptionFacts.joined(separator: ";")
-        }.joined(separator: "||")
+            
+            let linkedTransactions = ledger.transactions.filter { transaction in
+                transactionIDs.contains(transaction.id)
+            }
+            
+            exceptionFacts.append("variance=" + stableJSON(variance))
+            exceptionFacts.append("varianceLinks=" + stableJSON(linked))
+            exceptionFacts.append(
+                "varianceTransactions=" + stableJSON(linkedTransactions)
+            )
+        }
+        
+        if let physical = event.physicalCheck {
+            let linked = reconciliationLog.events.filter { boundary in
+                boundary.id == physical.reconciliationEventID
+            }
+            
+            exceptionFacts.append("physical=" + stableJSON(physical))
+            exceptionFacts.append("physicalLinks=" + stableJSON(linked))
+        }
+        
+        if let correction = event.inputCorrection {
+            let correctionTransactions = ledger.transactions.filter { transaction in
+                correction.correctionTransactionIDs.contains(transaction.id)
+            }
+            
+            var targetIDs = Set<CanonicalID>()
+            for transaction in correctionTransactions {
+                if let targetID = transaction.correctsTransactionID {
+                    targetIDs.insert(targetID)
+                }
+            }
+            
+            let linked = ledger.transactions.filter { transaction in
+                correction.correctionTransactionIDs.contains(transaction.id) ||
+                targetIDs.contains(transaction.id)
+            }
+            
+            exceptionFacts.append("correction=" + stableJSON(correction))
+            exceptionFacts.append("correctionLinks=" + stableJSON(linked))
+        }
+        
+        if let outcome = event.deliveryOutcome {
+            exceptionFacts.append(
+                "deliveryOutcome=" + stableJSON(outcome)
+            )
+        }
+        
+        if exceptionFacts.isEmpty {
+            return legacy
+        }
+        
+        legacy.append("::")
+        legacy.append(exceptionFacts.joined(separator: ";"))
+        return legacy
     }
 
     /// Legacy v3 snapshots did not protect this counter. Add it only when a
@@ -1001,11 +1312,39 @@ public final class Chunk5FPrototypeStore: ObservableObject {
             let fills = visit.fills.map { "\($0.id.uuidString):\($0.name):\($0.product):\($0.plannedLitres):\($0.completed)" }.joined(separator: "|")
             return "\(visit.id.uuidString):\(visit.customer):\(visit.site):\(visit.isTerminalLoad):\(fills)"
         }.joined(separator: "||")
-        let history = historyFingerprint(events: snapshot.eventLog, ledger: snapshot.cargoLedger, reconciliationLog: snapshot.reconciliationLog)
-        let runItemsSuffix = snapshot.runItems.map { "##runItems:" + stableJSON($0) } ?? ""
-        let driverSuffix = snapshot.driverLedgerEntries.map { "##driverLedger:" + stableJSON($0) } ?? ""
-        snapshot.authoritativeFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: snapshot.eventLog, unresolvedDiscrepancies: snapshot.unresolvedDiscrepancies) + runItemsSuffix + driverSuffix
-        persistenceDefaults.set(try JSONEncoder().encode(snapshot), forKey: Self.persistenceKey)
+        
+        let history = historyFingerprint(
+            events: snapshot.eventLog,
+            ledger: snapshot.cargoLedger,
+            reconciliationLog: snapshot.reconciliationLog
+        )
+        let runItemsSuffix = snapshot.runItems.map {
+            "##runItems:" + stableJSON($0)
+        } ?? ""
+        let driverSuffix = snapshot.driverLedgerEntries.map {
+            "##driverLedger:" + stableJSON($0)
+        } ?? ""
+        
+        let exceptionSuffix = exceptionConsequenceFingerprint(
+            events: snapshot.eventLog,
+            unresolvedDiscrepancies: snapshot.unresolvedDiscrepancies
+        )
+        
+        var rebuiltFingerprint = cargo
+        rebuiltFingerprint.append("##")
+        rebuiltFingerprint.append(run)
+        rebuiltFingerprint.append("##")
+        rebuiltFingerprint.append(history)
+        rebuiltFingerprint.append(exceptionSuffix)
+        rebuiltFingerprint.append(runItemsSuffix)
+        rebuiltFingerprint.append(driverSuffix)
+        
+        snapshot.authoritativeFingerprint = rebuiltFingerprint
+        
+        persistenceDefaults.set(
+            try JSONEncoder().encode(snapshot),
+            forKey: Self.persistenceKey
+        )
     }
 
     func validateExceptionFacts(
@@ -1163,7 +1502,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let open = current.filter(\.isOpen)
         return open.count == 1 && open[0].kind == (workspace == .rest ? .rest : .work)
     }
-
+    
     private func validate(snapshot s: Chunk5GLiveSnapshot) throws {
         guard s.evidenceSource == .live else { throw CocoaError(.coderReadCorrupt) }
         if s.shiftStartedAt != nil && s.shiftEndedAt == nil && s.driverLedgerEntries == nil {
@@ -1313,6 +1652,7 @@ public final class Chunk5FPrototypeStore: ObservableObject {
         let expectedFingerprint = cargo + "##" + run + "##" + history + exceptionConsequenceFingerprint(events: s.eventLog, unresolvedDiscrepancies: s.unresolvedDiscrepancies) + runItemsSuffix + driverSuffix
         guard expectedFingerprint == s.authoritativeFingerprint else {
             throw CocoaError(.coderReadCorrupt)
+        
         }
     }
 
